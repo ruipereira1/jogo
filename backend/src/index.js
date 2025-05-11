@@ -7,12 +7,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: ['https://desenharapido.netlify.app'], // Domínio do Netlify
     methods: ['GET', 'POST']
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: ['https://desenharapido.netlify.app'] // Domínio do Netlify
+}));
 app.get('/', (req, res) => {
   res.send('Servidor ArteRápida rodando!');
 });
