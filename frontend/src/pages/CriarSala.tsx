@@ -60,13 +60,21 @@ function CriarSala() {
           required
           disabled={isLoading}
         />
+        <span className="text-yellow-200 font-semibold mb-1 block">Escolha o número de rondas para a partida (1 a 10):</span>
         <input
           className="p-3 rounded text-blue-900"
           type="number"
           min={1}
           max={10}
-          value={rounds}
-          onChange={e => setRounds(Number(e.target.value))}
+          value={rounds === 0 ? '' : rounds}
+          onChange={e => {
+            const val = e.target.value;
+            if (val === '') {
+              setRounds(0);
+            } else {
+              setRounds(Number(val));
+            }
+          }}
           required
           disabled={isLoading}
           placeholder="Quantidade de rondas"

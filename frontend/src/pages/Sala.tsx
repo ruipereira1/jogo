@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socketService from '../services/socket';
+import QRCode from 'react-qr-code';
 
 interface Player {
   id: string;
@@ -36,6 +37,27 @@ function Sala() {
   const user = socketService.getUser();
   const isCurrentUserHost = players.find(p => p.id === user?.id)?.isHost;
   const [isLastRoundCountdown, setIsLastRoundCountdown] = useState(false);
+  const isMobile = window.innerWidth < 640;
+  const [isTouchDrawing, setIsTouchDrawing] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
+  const [lastJoined, setLastJoined] = useState<string | null>(null);
+  const [lastLeft, setLastLeft] = useState<string | null>(null);
+
+  let canvasWidth, canvasHeight;
+  if (window.innerWidth < 640) { // Mobile
+    canvasWidth = window.innerWidth;
+    // Altura máxima: 70% da altura do ecrã, mas nunca maior que a largura * 0.66
+    const maxCanvasHeight = Math.floor(window.innerHeight * 0.7);
+    const idealHeight = Math.floor(canvasWidth * 0.66);
+    canvasHeight = Math.min(idealHeight, maxCanvasHeight);
+  } else if (window.innerWidth < 1024) { // Tablet
+    canvasWidth = Math.floor(window.innerWidth * 0.8);
+    canvasHeight = Math.floor(canvasWidth * 0.66);
+  } else { // Desktop
+    canvasWidth = 500;
+    canvasHeight = 350;
+  }
 
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -48,12 +70,16 @@ function Sala() {
     }
 
     // Ouvir eventos do socket
-    socket.on('player-joined', ({ players }) => {
+    socket.on('player-joined', ({ players, playerName }) => {
       setPlayers(players);
+      setLastJoined(playerName);
+      setTimeout(() => setLastJoined(null), 3000);
     });
 
-    socket.on('player-left', ({ players }) => {
+    socket.on('player-left', ({ players, playerName }) => {
       setPlayers(players);
+      setLastLeft(playerName);
+      setTimeout(() => setLastLeft(null), 3000);
     });
 
     socket.on('players-update', ({ players, drawerId, round, maxRounds }) => {
@@ -148,6 +174,11 @@ function Sala() {
     };
   }, [roomCode, navigate]);
 
+  // Sincronizar newRounds com maxRounds sempre que maxRounds mudar
+  useEffect(() => {
+    setNewRounds(maxRounds);
+  }, [maxRounds]);
+
   const handleLeaveRoom = () => {
     // Desconectar do socket e voltar para home
     socketService.disconnect();
@@ -160,35 +191,91 @@ function Sala() {
 
   // Funções de desenho
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isDrawer) return;
+    if (!isDrawer || isTouchDrawing) return;
     setDrawing(true);
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    setLines(prev => [...prev, { points: [{ x, y }] }]);
+    const xNorm = x / canvasRef.current!.width;
+    const yNorm = y / canvasRef.current!.height;
+    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }] }]);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawer || !drawing) return;
+    if (!isDrawer || !drawing || isTouchDrawing) return;
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    const xNorm = x / canvasRef.current!.width;
+    const yNorm = y / canvasRef.current!.height;
     setLines(prev => {
       const newLines = [...prev];
-      newLines[newLines.length - 1].points.push({ x, y });
+      newLines[newLines.length - 1].points.push({ x: xNorm, y: yNorm });
       return newLines;
     });
+    // Enviar ponto em tempo real
+    const socket = socketService.getSocket();
+    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm } });
   };
 
   const handleMouseUp = () => {
-    if (!isDrawer) return;
+    if (!isDrawer || isTouchDrawing) return;
     setDrawing(false);
-    // Enviar a última linha desenhada para o backend
     const socket = socketService.getSocket();
     const lastLine = lines[lines.length - 1];
     if (lastLine) {
       socket.emit('draw-line', { roomCode, line: lastLine });
     }
+  };
+
+  // Funções de toque para desenhar no mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!isDrawer) return;
+    setIsTouchDrawing(true);
+    e.preventDefault();
+    e.stopPropagation();
+    setDrawing(true);
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const touch = e.touches[0];
+    const x = (touch.clientX - rect.left) / rect.width * canvasWidth;
+    const y = (touch.clientY - rect.top) / rect.height * canvasHeight;
+    const xNorm = x / canvasWidth;
+    const yNorm = y / canvasHeight;
+    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }] }]);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDrawer || !drawing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const touch = e.touches[0];
+    const x = (touch.clientX - rect.left) / rect.width * canvasWidth;
+    const y = (touch.clientY - rect.top) / rect.height * canvasHeight;
+    const xNorm = x / canvasWidth;
+    const yNorm = y / canvasHeight;
+    setLines(prev => {
+      const newLines = [...prev];
+      newLines[newLines.length - 1].points.push({ x: xNorm, y: yNorm });
+      return newLines;
+    });
+  };
+
+  const handleTouchEnd = () => {
+    if (!isDrawer) return;
+    setDrawing(false);
+    setIsTouchDrawing(false);
+    const socket = socketService.getSocket();
+    const lastLine = lines[lines.length - 1];
+    if (lastLine) {
+      socket.emit('draw-line', { roomCode, line: lastLine });
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (!isDrawer) return;
+    setDrawing(false);
+    setIsTouchDrawing(false); // Garante que o rato volta a funcionar
   };
 
   // Desenhar no canvas
@@ -197,19 +284,35 @@ function Sala() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Ajustar para alta resolução
+    const dpr = window.devicePixelRatio || 1;
+    // Guardar tamanhos lógicos
+    const logicalWidth = canvasWidth;
+    const logicalHeight = canvasHeight;
+    canvas.width = logicalWidth * dpr;
+    canvas.height = logicalHeight * dpr;
+    canvas.style.width = logicalWidth + 'px';
+    canvas.style.height = logicalHeight + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, logicalWidth, logicalHeight);
     ctx.strokeStyle = '#222';
-    ctx.lineWidth = 3;
+    // Largura do traço maior no mobile
+    ctx.lineWidth = window.innerWidth < 640 ? 6 : 3;
     ctx.lineCap = 'round';
     lines.forEach(line => {
       ctx.beginPath();
       line.points.forEach((pt: any, i: number) => {
-        if (i === 0) ctx.moveTo(pt.x, pt.y);
-        else ctx.lineTo(pt.x, pt.y);
+        const x = pt.x * logicalWidth;
+        const y = pt.y * logicalHeight;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
       });
       ctx.stroke();
     });
-  }, [lines]);
+  }, [lines, isDrawer, canvasWidth, canvasHeight, isTouchDrawing]);
 
   const handleGuessSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -223,6 +326,39 @@ function Sala() {
     setLines([]);
     socketService.getSocket().emit('clear-canvas', { roomCode });
   };
+
+  // Ao receber draw-line, adicionar ponto à última linha
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    const handleDrawLine = (data: any) => {
+      if (data.point) {
+        setLines(prev => {
+          if (prev.length === 0) return prev;
+          const newLines = [...prev];
+          newLines[newLines.length - 1].points.push(data.point);
+          return newLines;
+        });
+      } else if (data.line) {
+        setLines(prev => [...prev, data.line]);
+      }
+    };
+    socket.on('draw-line', handleDrawLine);
+    return () => {
+      socket.off('draw-line', handleDrawLine);
+    };
+  }, [roomCode]);
+
+  useEffect(() => {
+    function handleResize() {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    }
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
 
   if (isLoading) {
     return (
@@ -247,235 +383,339 @@ function Sala() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-400 text-white p-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold">Sala: {roomCode}</h1>
-          <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow ml-4">
-            Jogadores na sala: {players.length}
-          </span>
-          <div className="flex gap-2">
-            {isCurrentUserHost && !isGameStarted && (
-              <button
-                onClick={handleStartGame}
-                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
-              >
-                Iniciar Jogo
-              </button>
-            )}
-            <button 
-              onClick={handleLeaveRoom}
-              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition"
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-900 to-blue-400 text-white p-0" style={{overflow: 'hidden'}}>
+      <div className="flex-1 flex items-center justify-center w-full">
+        <div className="w-full flex flex-col items-center justify-center">
+          <div className="flex items-center gap-2 mb-6">
+            <h1 className="text-xl sm:text-2xl font-bold w-full break-words text-center">Sala: {roomCode}</h1>
+            <button
+              className="bg-yellow-300 text-blue-900 px-2 py-1 rounded font-bold shadow hover:bg-yellow-400 transition text-sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(roomCode || '');
+                } catch (err) {
+                  alert('Não foi possível copiar o código da sala.');
+                }
+              }}
+              title="Copiar código da sala"
             >
-              Sair da Sala
+              Copiar
             </button>
           </div>
-        </div>
-
-        {/* Lista de jogadores */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 mb-6">
-          <h2 className="font-semibold mb-3">Jogadores ({players.length})</h2>
-          <ul className="space-y-2">
-            {players.map(player => (
-              <li 
-                key={player.id} 
-                className={`flex items-center gap-2 p-2 bg-white/10 rounded ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}`}
-              >
-                <span className="flex-1">{player.name}</span>
-                <span className="text-yellow-300">{player.score} pts</span>
-                {player.isHost && (
-                  <span className="bg-yellow-300 text-blue-900 text-xs px-2 py-1 rounded">HOST</span>
-                )}
-                {drawerId === player.id && (
-                  <span className="bg-green-300 text-blue-900 text-xs px-2 py-1 rounded ml-2">DESENHISTA</span>
-                )}
-              </li>
-            ))}
-          </ul>
-          <div className="mt-2 text-sm text-yellow-200">Ronda: {round}</div>
-        </div>
-
-        {/* Lobby (temporário - futuramente será o canvas de desenho) */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
-          {isGameStarted ? (
-            isDrawer ? (
-              <>
-                <p className="text-xl mb-2 text-green-300 font-bold">Você é o desenhista!</p>
-                <p className="text-2xl mb-4">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-2 py-1 rounded">{word}</span></p>
-                <canvas
-                  ref={canvasRef}
-                  width={500}
-                  height={350}
-                  className="border-2 border-yellow-300 bg-white rounded mb-4 cursor-crosshair"
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseUp}
-                />
+          <div className="flex justify-between items-center mb-6">
+            <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow ml-4">
+              Jogadores na sala: {players.length}
+            </span>
+            <div className="flex gap-2">
+              {isCurrentUserHost && !isGameStarted && (
                 <button
-                  onClick={handleClearCanvas}
-                  className="bg-red-500 text-white px-4 py-2 rounded mb-2 hover:bg-red-600 transition"
+                  onClick={handleStartGame}
+                  className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
                 >
-                  Apagar desenho
+                  Iniciar Jogo
                 </button>
-                <p className="text-sm opacity-70">Desenhe algo relacionado à palavra!</p>
-              </>
-            ) : (
-              <>
-                <p className="text-xl mb-4 text-blue-200 font-bold">Aguardando o desenhista começar a desenhar...</p>
-                <canvas
-                  ref={canvasRef}
-                  width={500}
-                  height={350}
-                  className="border-2 border-yellow-300 bg-white rounded mb-4"
-                  style={{ cursor: 'not-allowed' }}
-                />
-                <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
-                {/* Campo de palpite */}
-                <form onSubmit={handleGuessSubmit} className="flex gap-2 mt-4 justify-center">
-                  <input
-                    type="text"
-                    className="p-2 rounded text-blue-900 w-64"
-                    placeholder={guessedCorrectly ? "Você já acertou!" : "Digite seu palpite..."}
-                    value={guess}
-                    onChange={e => setGuess(e.target.value)}
-                    disabled={guessedCorrectly}
-                    autoComplete="off"
-                  />
-                  <button
-                    type="submit"
-                    className="bg-yellow-300 text-blue-900 px-4 py-2 rounded font-semibold shadow hover:bg-yellow-400 transition"
-                    disabled={guessedCorrectly}
-                  >
-                    Enviar
-                  </button>
-                </form>
-                {/* Feed de palpites */}
-                <div className="mt-4 max-h-40 overflow-y-auto bg-white/20 rounded p-2 text-left">
-                  {guesses.map((g, i) => (
-                    <div key={i} className={g.correct ? "text-green-300 font-bold" : "text-white"}>
-                      <span className="font-semibold">{g.name}:</span> {g.text}
-                      {g.correct && <span className="ml-2 bg-green-300 text-blue-900 px-2 py-1 rounded text-xs">ACERTOU!</span>}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )
-          ) : (
-            <>
-              <p className="text-xl mb-4">Aguardando início do jogo...</p>
-              <p className="text-sm opacity-70">
-                Em breve: o canvas de desenho e a lógica de jogo aparecerão aqui!
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Cronómetro da ronda */}
-        {isGameStarted && (
-          <div className="mb-4 text-2xl font-bold text-yellow-300">Tempo restante: {timer}s</div>
-        )}
-
-        {winnerName && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <div className="bg-green-500 text-white text-4xl font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse">
-              {winnerName} acertou a palavra!
-            </div>
-          </div>
-        )}
-
-        {/* Mensagem de fim de ronda */}
-        {roundEnded && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <div className="bg-red-500 text-white text-3xl font-extrabold px-10 py-6 rounded-xl shadow-2xl border-4 border-white animate-pulse">
-              Tempo esgotado! A ronda terminou.
-            </div>
-          </div>
-        )}
-
-        {/* Countdown antes da ronda */}
-        {countdown !== null && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <div className="flex flex-col items-center">
-              {/* Número do countdown sempre em destaque no topo */}
-              <div className={`order-1 text-7xl font-extrabold px-16 py-10 rounded-xl shadow-2xl border-4 border-white mb-2 ${round === maxRounds ? 'bg-gradient-to-r from-pink-500 via-yellow-400 to-red-500 text-white animate-bounce' : 'bg-blue-800 text-white animate-pulse'}`}
-              >
-                {countdown}
-              </div>
-              {/* Info da ronda */}
-              <div className="order-2 text-2xl font-bold text-yellow-200 mb-2">
-                Ronda: {round} de {maxRounds}
-              </div>
-              {/* Mensagem especial só na última ronda e só durante o countdown, super perceptível */}
-              {isLastRoundCountdown && (
-                <div className="order-3 fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-                  <div className="relative flex flex-col items-center">
-                    <div className="absolute inset-0 bg-black/80 rounded-xl animate-pulse"></div>
-                    <div className="relative z-10 px-12 py-8 rounded-xl border-8 border-pink-400 shadow-2xl bg-gradient-to-r from-yellow-400 via-pink-500 to-red-500 animate-bounce flex flex-col items-center">
-                      <span className="text-7xl font-extrabold text-white drop-shadow-lg mb-4 flex items-center gap-4">
-                        <span role='img' aria-label='trophy'>🏆</span>
-                        ÚLTIMA RONDA!
-                        <span role='img' aria-label='trophy'>🏆</span>
-                      </span>
-                      <span className="text-2xl text-yellow-100 font-bold mt-2 text-center">Dê o seu melhor, esta é a última chance!</span>
-                    </div>
-                  </div>
-                </div>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* Pódio final */}
-        {podium && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/80">
-            <div className="bg-yellow-300 text-blue-900 rounded-xl shadow-2xl p-10 flex flex-col items-center animate-pulse border-4 border-white">
-              <h2 className="text-4xl font-extrabold mb-6">🏆 Pódio Final 🏆</h2>
-              <ol className="text-2xl font-bold space-y-2 mb-4">
-                {podium.slice(0, 3).map((player, idx) => (
-                  <li key={player.id} className={idx === 0 ? 'text-4xl text-yellow-600' : idx === 1 ? 'text-3xl text-gray-700' : 'text-2xl text-orange-700'}>
-                    {idx === 0 && '🥇 '}
-                    {idx === 1 && '🥈 '}
-                    {idx === 2 && '🥉 '}
-                    {player.name} — {player.score} pts
-                  </li>
-                ))}
-              </ol>
-              <div className="text-lg mt-2 mb-4">Parabéns a todos!</div>
-              {isCurrentUserHost && (
-                <div className="flex flex-col items-center gap-2 mt-4">
-                  <label className="text-blue-900 font-bold">Número de rondas:</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={newRounds}
-                    onChange={e => setNewRounds(Number(e.target.value))}
-                    className="p-2 rounded text-blue-900 w-24 text-center"
-                  />
-                  <button
-                    className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold mt-2 hover:bg-green-700 transition"
-                    onClick={() => {
-                      socketService.getSocket().emit('restart-game', { roomCode, rounds: newRounds });
-                      setPodium(null);
-                    }}
-                  >
-                    Iniciar nova partida
-                  </button>
-                </div>
-              )}
-              {!isCurrentUserHost && (
-                <div className="text-blue-900 font-bold mt-4">Aguardando o host iniciar uma nova partida...</div>
-              )}
-              <button
-                className="bg-red-600 text-white px-6 py-2 rounded-lg font-bold mt-6 hover:bg-red-700 transition"
+              <button 
                 onClick={handleLeaveRoom}
+                className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition"
               >
-                Sair
+                Sair da Sala
               </button>
             </div>
           </div>
-        )}
+
+          {/* Lista de jogadores */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 mb-6">
+            <h2 className="font-semibold mb-3">Jogadores ({players.length})</h2>
+            <ul className="space-y-2 max-h-40 overflow-y-auto sm:max-h-64 w-full">
+              {players.map(player => (
+                <li 
+                  key={player.id} 
+                  className={`flex items-center gap-2 p-2 bg-white/10 rounded ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}`}
+                >
+                  <span className="flex-1">{player.name}</span>
+                  <span className="text-yellow-300">{player.score} pts</span>
+                  {player.isHost && (
+                    <span className="bg-yellow-300 text-blue-900 text-xs px-2 py-1 rounded">HOST</span>
+                  )}
+                  {drawerId === player.id && (
+                    <span className="bg-green-300 text-blue-900 text-xs px-2 py-1 rounded ml-2">DESENHISTA</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 text-sm text-yellow-200">Ronda: {round}</div>
+          </div>
+
+          {/* Lobby (temporário - futuramente será o canvas de desenho) */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
+            {isGameStarted ? (
+              isDrawer ? (
+                <>
+                  <p className="text-xl mb-2 text-green-300 font-bold">Você é o desenhista!</p>
+                  <p className="text-2xl mb-4">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-2 py-1 rounded">{word}</span></p>
+                  <canvas
+                    ref={canvasRef}
+                    width={canvasWidth}
+                    height={canvasHeight}
+                    style={{
+                      width: '100vw',
+                      height: canvasHeight,
+                      maxWidth: '100vw',
+                      maxHeight: '70vh',
+                      display: 'block',
+                      margin: '0 auto',
+                      border: '2px solid #FFD600',
+                      background: 'white',
+                      borderRadius: '0.5rem',
+                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
+                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
+                      touchAction: 'none',
+                      userSelect: 'none',
+                      boxSizing: 'border-box',
+                      overflow: 'hidden'
+                    }}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseLeave}
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                  />
+                  <button
+                    onClick={handleClearCanvas}
+                    className="bg-red-500 text-white px-4 py-2 rounded mb-2 hover:bg-red-600 transition"
+                  >
+                    Apagar desenho
+                  </button>
+                  <p className="text-sm opacity-70">Desenhe algo relacionado à palavra!</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xl mb-4 text-blue-200 font-bold">Aguardando o desenhista começar a desenhar...</p>
+                  <canvas
+                    ref={canvasRef}
+                    width={canvasWidth}
+                    height={canvasHeight}
+                    style={{
+                      width: '100vw',
+                      height: canvasHeight,
+                      maxWidth: '100vw',
+                      maxHeight: '70vh',
+                      display: 'block',
+                      margin: '0 auto',
+                      border: '2px solid #FFD600',
+                      background: 'white',
+                      borderRadius: '0.5rem',
+                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
+                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
+                      touchAction: 'none',
+                      userSelect: 'none',
+                      boxSizing: 'border-box',
+                      overflow: 'hidden'
+                    }}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseLeave}
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                  />
+                  <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
+                  {/* Campo de palpite */}
+                  <form onSubmit={handleGuessSubmit} className="flex flex-col sm:flex-row gap-4 mt-4 w-full justify-center">
+                    <input
+                      type="text"
+                      className="w-full p-3 rounded text-blue-900 text-base sm:text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      placeholder={guessedCorrectly ? "Você já acertou!" : "Digite seu palpite..."}
+                      value={guess}
+                      onChange={e => setGuess(e.target.value)}
+                      disabled={guessedCorrectly}
+                      autoComplete="off"
+                    />
+                    <button
+                      type="submit"
+                      className="w-full sm:w-auto py-3 px-4 text-lg font-semibold rounded shadow transition mb-2 sm:mb-0 focus:outline-none focus:ring-2 focus:ring-yellow-400 bg-yellow-300 text-blue-900 hover:bg-yellow-400"
+                      disabled={guessedCorrectly}
+                    >
+                      Enviar
+                    </button>
+                  </form>
+                  {/* Feed de palpites */}
+                  <div className="mt-4 max-h-40 overflow-y-auto bg-white/20 rounded p-2 text-left">
+                    {guesses.map((g, i) => (
+                      <div key={i} className={g.correct ? "text-green-300 font-bold" : "text-white"}>
+                        <span className="font-semibold">{g.name}:</span> {g.text}
+                        {g.correct && <span className="ml-2 bg-green-300 text-blue-900 px-2 py-1 rounded text-xs">ACERTOU!</span>}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            ) : (
+              <>
+                <p className="text-xl mb-4">Aguardando início do jogo...</p>
+                <p className="text-sm opacity-70">
+                  Em breve: o canvas de desenho e a lógica de jogo aparecerão aqui!
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* Cronómetro da ronda */}
+          {isGameStarted && (
+            <div className="mb-4 text-2xl font-bold text-yellow-300">Tempo restante: {timer}s</div>
+          )}
+
+          {winnerName && (
+            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+              <div className="bg-green-500 text-white text-4xl font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse">
+                {winnerName} acertou a palavra!
+              </div>
+            </div>
+          )}
+
+          {/* Mensagem de fim de ronda */}
+          {roundEnded && (
+            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+              <div className="bg-red-500 text-white text-3xl font-extrabold px-10 py-6 rounded-xl shadow-2xl border-4 border-white animate-pulse">
+                Tempo esgotado! A ronda terminou.
+              </div>
+            </div>
+          )}
+
+          {/* Countdown antes da ronda */}
+          {countdown !== null && (
+            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+              <div className="flex flex-col items-center">
+                {/* Número do countdown sempre em destaque no topo */}
+                <div className={`order-1 font-extrabold rounded-xl shadow-2xl border-4 border-white mb-2
+                  flex items-center justify-center
+                  text-3xl px-4 py-4 w-full max-w-xs mx-auto
+                  sm:text-7xl sm:px-16 sm:py-10 sm:max-w-none
+                  ${round === maxRounds ? 'bg-gradient-to-r from-pink-500 via-yellow-400 to-red-500 text-white animate-bounce' : 'bg-blue-800 text-white animate-pulse'}`}
+                  style={{ minHeight: '4rem' }}
+                >
+                  {countdown}
+                </div>
+                {/* Info da ronda */}
+                <div className="order-2 text-2xl font-bold text-yellow-200 mb-2">
+                  Ronda: {round} de {maxRounds}
+                </div>
+                {/* Mensagem especial só na última ronda e só durante o countdown, super perceptível */}
+                {isLastRoundCountdown && (
+                  <div className="order-3 fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+                    <div className="relative flex flex-col items-center w-full max-w-xs sm:max-w-lg mx-auto">
+                      <div className="absolute inset-0 bg-black/80 rounded-xl animate-pulse"></div>
+                      <div className="relative z-10 px-4 py-4 sm:px-12 sm:py-8 rounded-xl border-8 border-pink-400 shadow-2xl bg-gradient-to-r from-yellow-400 via-pink-500 to-red-500 animate-bounce flex flex-col items-center w-full max-w-xs sm:max-w-lg mx-auto">
+                        <span className="text-2xl sm:text-7xl font-extrabold text-white drop-shadow-lg mb-4 flex items-center gap-4">
+                          <span role='img' aria-label='trophy'>🏆</span>
+                          ÚLTIMA RONDA!
+                          <span role='img' aria-label='trophy'>🏆</span>
+                        </span>
+                        <span className="text-base sm:text-2xl text-yellow-100 font-bold mt-2 text-center">Dê o seu melhor, esta é a última chance!</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Pódio final */}
+          {podium && (
+            <div className="fixed inset-0 flex items-center justify-center z-[9999] bg-black/90" style={{pointerEvents: 'auto'}}>
+              <div className="bg-yellow-300 text-blue-900 rounded-xl shadow-2xl p-10 flex flex-col items-center animate-pulse border-4 border-white">
+                <h2 className="text-4xl font-extrabold mb-6">🏆 Pódio Final 🏆</h2>
+                <ol className="text-2xl font-bold space-y-2 mb-4">
+                  {podium.slice(0, 3).map((player, idx) => (
+                    <li key={player.id} className={idx === 0 ? 'text-4xl text-yellow-600' : idx === 1 ? 'text-3xl text-gray-700' : 'text-2xl text-orange-700'}>
+                      {idx === 0 && '🥇 '}
+                      {idx === 1 && '🥈 '}
+                      {idx === 2 && '🥉 '}
+                      {player.name} — {player.score} pts
+                    </li>
+                  ))}
+                </ol>
+                <div className="text-lg mt-2 mb-4">Parabéns a todos!</div>
+                {isCurrentUserHost && (
+                  <div className="flex flex-col items-center gap-2 mt-4">
+                    <span className="text-blue-900 font-semibold mb-1">Selecione o número de rondas para a próxima partida:</span>
+                    <label className="text-blue-900 font-bold">Número de rondas:</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={newRounds}
+                      onChange={e => setNewRounds(Number(e.target.value))}
+                      className="p-2 rounded text-blue-900 w-24 text-center"
+                    />
+                    <button
+                      className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold mt-2 hover:bg-green-700 transition"
+                      onClick={() => {
+                        socketService.getSocket().emit('restart-game', { roomCode, rounds: newRounds });
+                        setPodium(null);
+                      }}
+                    >
+                      Iniciar nova partida
+                    </button>
+                  </div>
+                )}
+                {!isCurrentUserHost && (
+                  <div className="text-blue-900 font-bold mt-4">Aguardando o host iniciar uma nova partida...</div>
+                )}
+                <button
+                  className="bg-red-600 text-white px-6 py-2 rounded-lg font-bold mt-6 hover:bg-red-700 transition"
+                  onClick={handleLeaveRoom}
+                >
+                  Sair
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isDrawer && isMobile && isPortrait && !podium && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '100vw',
+              height: '100vh',
+              background: 'rgba(0,0,0,0.7)',
+              zIndex: 1000,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              fontSize: '1.5rem',
+              textAlign: 'center',
+              padding: '2rem'
+            }}>
+              <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginBottom: '1rem'}}>
+                <rect x="10" y="30" width="60" height="20" rx="6" fill="#FFD600" stroke="white" strokeWidth="4"/>
+                <polygon points="70,40 80,35 80,45" fill="white"/>
+                <polygon points="10,40 0,35 0,45" fill="white"/>
+                <rect x="30" y="35" width="20" height="10" rx="2" fill="#222"/>
+              </svg>
+              <div>Para desenhar melhor, gira o telemóvel para <b>horizontal</b>!</div>
+            </div>
+          )}
+
+          {lastJoined && (
+            <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded shadow-lg z-[9999] font-bold text-lg animate-bounce">
+              {lastJoined} entrou na sala!
+            </div>
+          )}
+
+          {lastLeft && (
+            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded shadow-lg z-[9999] font-bold text-lg animate-bounce">
+              {lastLeft} saiu da sala!
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

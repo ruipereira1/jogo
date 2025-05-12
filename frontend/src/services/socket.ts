@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = 'http://localhost:4000';
+const SOCKET_URL = 'https://jogo-yslo.onrender.com';
 
 class SocketService {
   private socket: Socket | null = null;
@@ -57,10 +57,18 @@ class SocketService {
     });
   }
 
-  joinRoom(userName: string, roomCode: string) {
+  joinRoom(userName: string, roomCode: string, playerId?: string) {
     const socket = this.getSocket();
+    let id = playerId;
+    if (!id) {
+      id = localStorage.getItem('playerId') || '';
+      if (!id) {
+        id = socket.id ?? '';
+        localStorage.setItem('playerId', id);
+      }
+    }
     return new Promise<void>((resolve, reject) => {
-      socket.emit('join-room', { userName, roomCode }, (response: any) => {
+      socket.emit('join-room', { userName, roomCode, playerId: id }, (response: any) => {
         if (response.success) {
           this.setUser({ id: socket.id ?? '', name: userName });
           resolve();
