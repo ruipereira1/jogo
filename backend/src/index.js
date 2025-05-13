@@ -252,7 +252,7 @@ io.on('connection', (socket) => {
               playerId: socket.id,
               players: room.players
             });
-          }, 20000); // 20 segundos
+          }, 120000); // 120 segundos
         }
       }
       console.log('Usuário desconectado:', socket.id);
