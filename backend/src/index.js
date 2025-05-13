@@ -218,6 +218,7 @@ io.on('connection', (socket) => {
       console.log(`${userName} entrou/reentrou na sala ${roomCode}`);
       
       // Notificar todos na sala sobre o novo jogador
+      console.log('player-joined emitido para sala', roomCode, room.players.map(p => p.name));
       io.to(roomCode).emit('player-joined', {
         playerId: socket.data.playerId,
         playerName: userName,
@@ -307,6 +308,15 @@ io.on('connection', (socket) => {
                 id, playerId, name, score, isHost, online
               }))
             });
+            // Emitir também o estado atualizado da lista de jogadores
+            io.to(roomCode).emit('players-update', {
+              players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+                id, playerId, name, score, isHost, online
+              })),
+              drawerId: room.currentDrawer,
+              round: room.round,
+              maxRounds: room.maxRounds
+            });
           }, 120000); // 120 segundos
         }
       }
@@ -392,9 +402,9 @@ io.on('connection', (socket) => {
       // Se todos os jogadores (exceto o desenhista) já acertaram, termina a ronda
       const totalPlayers = room.players.filter(p => p.id !== room.currentDrawer && p.online !== false).length;
       if (room._correctPlayers.length >= totalPlayers) {
-        if (room.timerInterval) clearInterval(room.timerInterval);
-        io.to(roomCode).emit('round-ended', { reason: 'guessed' });
-        setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
+      if (room.timerInterval) clearInterval(room.timerInterval);
+      io.to(roomCode).emit('round-ended', { reason: 'guessed' });
+      setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
       }
     }
   });
