@@ -107,7 +107,7 @@ function startRound(room, io) {
 function nextRoundOrEnd(room, io) {
   if (room.round < room.maxRounds) {
     room.round++;
-    setTimeout(() => startRound(room, io), 5000); // Espera 5s antes de nova ronda
+    setTimeout(() => startRound(room, io), 2000); // Espera 2s antes de nova ronda
   } else {
     room.status = 'finished';
     io.to(room.id).emit('game-ended', { players: room.players });
@@ -152,7 +152,7 @@ io.on('connection', (socket) => {
   });
 
   // Entrar em sala
-  socket.on('join-room', ({ userName, roomCode }, callback) => {
+  socket.on('join-room', ({ userName, roomCode, playerId }, callback) => {
     try {
       const room = rooms.get(roomCode);
       
@@ -160,28 +160,52 @@ io.on('connection', (socket) => {
         return callback({ success: false, error: 'Sala não encontrada' });
       }
 
-      if (room.status !== 'waiting') {
+      // Verificar se já existe jogador com este playerId
+      let existingPlayer = null;
+      if (playerId) {
+        existingPlayer = room.players.find(p => p.playerId === playerId);
+      }
+
+      // Se o jogo já começou, só permitir reentrada de quem já estava na sala
+      if (room.status !== 'waiting' && !existingPlayer) {
         return callback({ success: false, error: 'Jogo já iniciado' });
       }
 
-      // Adicionar jogador à sala
-      room.players.push({
-        id: socket.id,
-        name: userName,
-        score: 0,
-        isHost: false
-      });
+      if (existingPlayer) {
+        // Jogador está a reentrar: atualizar socket.id e nome
+        existingPlayer.id = socket.id;
+        existingPlayer.name = userName;
+        // Cancelar timeout de remoção se existir
+        if (existingPlayer._removeTimeout) {
+          clearTimeout(existingPlayer._removeTimeout);
+          delete existingPlayer._removeTimeout;
+        }
+      } else {
+        // Impedir duplicidade de playerId
+        if (playerId && room.players.some(p => p.playerId === playerId)) {
+          return callback({ success: false, error: 'Já existe um jogador com este ID na sala.' });
+        }
+        // Adicionar novo jogador
+        room.players.push({
+          id: socket.id,
+          playerId: playerId || socket.id,
+          name: userName,
+          score: 0,
+          isHost: false
+        });
+      }
 
       // Associar o socket à sala
       socket.join(roomCode);
       socket.data.roomCode = roomCode;
       socket.data.userName = userName;
+      socket.data.playerId = playerId || socket.id;
 
-      console.log(`${userName} entrou na sala ${roomCode}`);
+      console.log(`${userName} entrou/reentrou na sala ${roomCode}`);
       
       // Notificar todos na sala sobre o novo jogador
       io.to(roomCode).emit('player-joined', {
-        playerId: socket.id,
+        playerId: socket.data.playerId,
         playerName: userName,
         players: room.players
       });
@@ -198,36 +222,38 @@ io.on('connection', (socket) => {
     try {
       const roomCode = socket.data.roomCode;
       const userName = socket.data.userName;
+      const playerId = socket.data.playerId;
 
       if (roomCode && rooms.has(roomCode)) {
         const room = rooms.get(roomCode);
-        
-        // Remover jogador da sala
-        room.players = room.players.filter(player => player.id !== socket.id);
-        
-        console.log(`${userName || socket.id} saiu da sala ${roomCode}`);
-        
-        // Se não sobrou ninguém, deletar a sala
-        if (room.players.length === 0) {
-          rooms.delete(roomCode);
-          console.log(`Sala ${roomCode} deletada pois ficou vazia`);
-          return;
+        // Encontrar jogador pelo playerId
+        const player = room.players.find(p => p.playerId === playerId);
+        if (player) {
+          // Timeout de 20s para reconexão
+          player._removeTimeout = setTimeout(() => {
+            // Remover jogador da sala
+            room.players = room.players.filter(p => p.playerId !== playerId);
+            console.log(`${userName || socket.id} removido da sala ${roomCode} por timeout de reconexão`);
+            // Se não sobrou ninguém, deletar a sala
+            if (room.players.length === 0) {
+              rooms.delete(roomCode);
+              console.log(`Sala ${roomCode} deletada pois ficou vazia`);
+              return;
+            }
+            // Se o host saiu, passar o controle para outro jogador
+            if (room.host === socket.id) {
+              room.host = room.players[0].id;
+              room.players[0].isHost = true;
+              console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
+            }
+            // Notificar os jogadores restantes
+            io.to(roomCode).emit('player-left', {
+              playerId: socket.id,
+              players: room.players
+            });
+          }, 20000); // 20 segundos
         }
-        
-        // Se o host saiu, passar o controle para outro jogador
-        if (room.host === socket.id) {
-          room.host = room.players[0].id;
-          room.players[0].isHost = true;
-          console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
-        }
-        
-        // Notificar os jogadores restantes
-        io.to(roomCode).emit('player-left', {
-          playerId: socket.id,
-          players: room.players
-        });
       }
-      
       console.log('Usuário desconectado:', socket.id);
     } catch (error) {
       console.error('Erro ao lidar com desconexão:', error);
