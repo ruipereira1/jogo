@@ -11,6 +11,7 @@ function EntrarSala() {
   const navigate = useNavigate();
   const location = useLocation();
   const [playerId, setPlayerId] = useState<string>('');
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   useEffect(() => {
     // Conectar ao servidor Socket.IO
@@ -33,8 +34,26 @@ function EntrarSala() {
     }
     setPlayerId(id);
     
+    // Reconexão automática
+    const socket = socketService.getSocket();
+    const handleDisconnect = () => {
+      setIsReconnecting(true);
+    };
+    const handleConnect = () => {
+      setIsReconnecting(false);
+      // Se temos nome e código, tentar reentrar automaticamente
+      const nome = localStorage.getItem('nomeJogador') || nomeGuardado;
+      if (nome && codigo) {
+        socketService.joinRoom(nome, codigo, id).then(() => {
+          navigate(`/sala/${codigo}`);
+        });
+      }
+    };
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect', handleConnect);
     return () => {
-      // Desconectar apenas se o usuário sair sem entrar na sala
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect', handleConnect);
       if (!socketService.getUser()) {
         socketService.disconnect();
       }
@@ -81,6 +100,11 @@ function EntrarSala() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white">
+      {isReconnecting && (
+        <div className="fixed top-0 left-0 w-full bg-yellow-400 text-blue-900 text-center py-2 z-50 font-bold animate-pulse">
+          Ligação perdida. A tentar reconectar...
+        </div>
+      )}
       <h2 className="text-2xl font-bold mb-6">Entrar em Sala</h2>
       
       {error && (
@@ -111,22 +135,6 @@ function EntrarSala() {
             style={{ textTransform: 'uppercase' }}
             disabled={isLoading}
           />
-          <button
-            type="button"
-            className="bg-yellow-300 text-blue-900 px-3 py-2 rounded font-bold shadow hover:bg-yellow-400 transition"
-            onClick={async () => {
-              try {
-                const text = await navigator.clipboard.readText();
-                setCodigo(text.trim().toUpperCase().slice(0, 6));
-              } catch (err) {
-                alert('Não foi possível aceder à área de transferência.');
-              }
-            }}
-            disabled={isLoading}
-            title="Colar código da sala"
-          >
-            Colar
-          </button>
         </div>
         <button 
           className={`${
@@ -140,7 +148,6 @@ function EntrarSala() {
           {isLoading ? 'Entrando...' : 'Entrar'}
         </button>
       </form>
-      
       <button 
         onClick={() => navigate('/')}
         className="mt-4 text-white hover:underline"
@@ -151,4 +158,4 @@ function EntrarSala() {
   );
 }
 
-export default EntrarSala; 
+export default EntrarSala;

@@ -37,10 +37,19 @@ class SocketService {
 
   setUser(user: { id: string; name: string }) {
     this.user = user;
+    localStorage.setItem('nomeJogador', user.name);
+    localStorage.setItem('playerId', user.id);
   }
 
   getUser() {
-    return this.user;
+    if (this.user) return this.user;
+    const name = localStorage.getItem('nomeJogador');
+    const id = localStorage.getItem('playerId');
+    if (name && id) {
+      this.user = { id, name };
+      return this.user;
+    }
+    return null;
   }
 
   createRoom(userName: string, rounds: number = 3, difficulty: string = 'facil') {

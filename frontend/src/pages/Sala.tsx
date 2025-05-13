@@ -48,6 +48,9 @@ function Sala() {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [drawerLeft, setDrawerLeft] = useState<string | null>(null);
+  const [hostLeft, setHostLeft] = useState<string | null>(null);
+  const [removedByTimeout, setRemovedByTimeout] = useState(false);
 
   let canvasWidth, canvasHeight;
   if (window.innerWidth < 640) { // Mobile
@@ -163,8 +166,9 @@ function Sala() {
     });
 
     socket.on('game-ended', ({ players }) => {
+      setPlayers(players || []);
       // Ordenar por pontuação decrescente
-      const sorted = [...players].sort((a, b) => b.score - a.score);
+      const sorted = [...(players || [])].sort((a, b) => b.score - a.score);
       setPodium(sorted);
     });
 
@@ -180,6 +184,21 @@ function Sala() {
 
     socket.on('player-offline', ({ players }) => {
       setPlayers(players);
+    });
+
+    socket.on('drawer-left', ({ drawerName }) => {
+      setDrawerLeft(drawerName);
+      setTimeout(() => setDrawerLeft(null), 4000);
+    });
+
+    socket.on('host-left', ({ newHostName }) => {
+      setHostLeft(newHostName);
+      setTimeout(() => setHostLeft(null), 4000);
+    });
+
+    socket.on('removed-by-timeout', () => {
+      setRemovedByTimeout(true);
+      setTimeout(() => setRemovedByTimeout(false), 8000);
     });
 
     setIsLoading(false);
@@ -199,6 +218,9 @@ function Sala() {
       socket.off('game-restarted');
       socket.off('room-state');
       socket.off('player-offline');
+      socket.off('drawer-left');
+      socket.off('host-left');
+      socket.off('removed-by-timeout');
     };
   }, [roomCode, navigate]);
 
@@ -438,6 +460,20 @@ function Sala() {
         <div className="bg-red-500 text-white p-4 rounded-lg mb-4">{error}</div>
         <button 
           onClick={() => navigate('/')}
+          className="bg-white text-blue-900 px-6 py-2 rounded-lg font-semibold shadow hover:bg-gray-200 transition"
+        >
+          Voltar para Home
+        </button>
+      </div>
+    );
+  }
+
+  if (removedByTimeout) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400">
+        <div className="bg-red-500 text-white p-4 rounded-lg mb-4 text-xl font-bold">Foste removido da sala por inatividade. Por favor, entra novamente.</div>
+        <button 
+          onClick={() => navigate('/')} 
           className="bg-white text-blue-900 px-6 py-2 rounded-lg font-semibold shadow hover:bg-gray-200 transition"
         >
           Voltar para Home
@@ -773,6 +809,18 @@ function Sala() {
           {lastLeft && (
             <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded shadow-lg z-[9999] font-bold text-lg animate-bounce">
               {lastLeft} saiu da sala!
+            </div>
+          )}
+
+          {drawerLeft && (
+            <div className="fixed top-36 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-blue-900 px-6 py-3 rounded shadow-lg z-[9999] font-bold text-lg animate-bounce">
+              O desenhista <b>{drawerLeft}</b> saiu da sala! O tempo continua a contar.
+            </div>
+          )}
+
+          {hostLeft && (
+            <div className="fixed top-52 left-1/2 transform -translate-x-1/2 bg-yellow-300 text-blue-900 px-6 py-3 rounded shadow-lg z-[9999] font-bold text-lg animate-bounce">
+              O host saiu! <b>{hostLeft}</b> é agora o novo host.
             </div>
           )}
         </div>
