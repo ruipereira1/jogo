@@ -321,27 +321,30 @@ io.on('connection', (socket) => {
       text,
       correct: isCorrect
     });
-    // Lógica de pontuação dinâmica
+    // Lógica de pontuação dinâmica melhorada
     if (isCorrect) {
       // Calcular pontos com base no tempo restante
-      let timeLeft = 0;
-      if (room.timerInterval && room.timePerRound) {
-        // Encontrar o tempo restante do último timer-update enviado
-        // Como não guardamos o timeLeft, vamos estimar pelo tempoPerRound e pelo round
-        // Melhor: guardar timeLeft no room a cada timer-update
-        // (Implementação rápida: guardar timeLeft no room)
+      let timeLeft = room._lastTimeLeft || 0;
+      // Verificar se já houve acertos nesta ronda
+      if (!room._correctPlayers) room._correctPlayers = [];
+      const isFirstCorrect = room._correctPlayers.length === 0;
+      // Adicionar este jogador à lista de quem acertou
+      if (!room._correctPlayers.includes(socket.id)) {
+        room._correctPlayers.push(socket.id);
       }
-      // Se não existir, usar 0
-      timeLeft = room._lastTimeLeft || 0;
-      // Pontuação: 10 + (tempoRestante / 5) para quem acerta
-      const playerPoints = 10 + Math.floor(timeLeft / 5);
-      const drawerPoints = 5;
-      // Jogador que acertou ganha pontos proporcionais ao tempo
+      // Pontuação para quem acerta: base 20 + bónus pelo tempo + bónus se for o primeiro
+      const basePoints = 20;
+      const timeBonus = Math.floor(timeLeft * 0.5); // mais rápido, mais pontos
+      const firstBonus = isFirstCorrect ? 5 : 0;
+      const playerPoints = Math.max(10, Math.min(50, basePoints + timeBonus + firstBonus));
+      // Pontuação para o desenhista: 5 pontos por cada jogador que acertou
+      const drawerPoints = 5 * room._correctPlayers.length;
+      // Jogador que acertou ganha pontos
       const player = room.players.find(p => p.id === socket.id);
       if (player) player.score += playerPoints;
-      // Desenhista ganha sempre 5 pontos fixos
+      // Desenhista ganha pontos
       const drawer = room.players.find(p => p.id === room.currentDrawer);
-      if (drawer) drawer.score += drawerPoints;
+      if (drawer) drawer.score = drawerPoints;
       // Atualizar todos os jogadores com a nova lista de pontuações
       io.to(roomCode).emit('players-update', {
         players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
@@ -352,10 +355,13 @@ io.on('connection', (socket) => {
         maxRounds: room.maxRounds
       });
       console.log(`${userName} acertou a palavra! (+${playerPoints} pontos) | Desenhista (+${drawerPoints} pontos)`);
-      // Avançar para próxima ronda ou terminar
-      if (room.timerInterval) clearInterval(room.timerInterval);
-      io.to(roomCode).emit('round-ended', { reason: 'guessed' });
-      setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
+      // Se todos os jogadores (exceto o desenhista) já acertaram, termina a ronda
+      const totalPlayers = room.players.filter(p => p.id !== room.currentDrawer && p.online !== false).length;
+      if (room._correctPlayers.length >= totalPlayers) {
+        if (room.timerInterval) clearInterval(room.timerInterval);
+        io.to(roomCode).emit('round-ended', { reason: 'guessed' });
+        setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
+      }
     }
   });
 
