@@ -137,7 +137,8 @@ io.on('connection', (socket) => {
         round: 0,
         maxRounds: rounds || 3,
         timePerRound: 60,
-        difficulty: difficulty || 'facil'
+        difficulty: difficulty || 'facil',
+        lines: [] // Guardar linhas desenhadas
       });
       // Associar o socket à sala
       socket.join(roomCode);
@@ -272,10 +273,19 @@ io.on('connection', (socket) => {
   });
 
   // Receber traço do desenhista e repassar para a sala
-  socket.on('draw-line', ({ roomCode, line }) => {
-    if (!roomCode || !line) return;
-    // Enviar para todos, exceto quem desenhou
-    socket.to(roomCode).emit('draw-line', line);
+  socket.on('draw-line', ({ roomCode, line, point }) => {
+    if (!roomCode || (!line && !point)) return;
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    if (line) {
+      room.lines.push(line);
+      socket.to(roomCode).emit('draw-line', line);
+    } else if (point) {
+      // Adicionar ponto à última linha
+      if (room.lines.length === 0) return;
+      room.lines[room.lines.length - 1].points.push(point);
+      socket.to(roomCode).emit('draw-line', { point });
+    }
   });
 
   // Palpites dos jogadores
@@ -329,6 +339,9 @@ io.on('connection', (socket) => {
   // Limpar o canvas
   socket.on('clear-canvas', ({ roomCode }) => {
     if (!roomCode) return;
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    room.lines = [];
     socket.to(roomCode).emit('clear-canvas');
   });
 
@@ -344,6 +357,24 @@ io.on('connection', (socket) => {
     room.id = roomCode;
     io.to(roomCode).emit('game-restarted');
     startRound(room, io);
+  });
+
+  // Sincronização total do estado ao reconectar
+  socket.on('request-room-state', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    // Enviar estado completo apenas para o socket que pediu
+    socket.emit('room-state', {
+      players: room.players,
+      drawerId: room.currentDrawer,
+      round: room.round,
+      maxRounds: room.maxRounds,
+      status: room.status,
+      word: room.currentWord,
+      lines: room.lines,
+      timer: room._lastTimeLeft || 0,
+      podium: room.status === 'finished' ? [...room.players].sort((a, b) => b.score - a.score) : null
+    });
   });
 });
 
