@@ -62,6 +62,11 @@ function startRound(room, io) {
       }
       const drawerId = possibleDrawers[Math.floor(Math.random() * possibleDrawers.length)];
       const drawer = room.players.find(p => p.id === drawerId);
+      if (!drawer) {
+        console.error('Erro: Não foi possível encontrar um desenhista válido para a sala', room.id);
+        io.to(room.id).emit('round-ended', { reason: 'sem-desenhista' });
+        return;
+      }
       room.currentDrawer = drawer.id;
       // Sorteia a palavra conforme dificuldade
       let wordList = WORDS_FACIL;
@@ -222,6 +227,21 @@ io.on('connection', (socket) => {
       });
 
       callback({ success: true });
+
+      // Enviar estado completo da sala apenas para o jogador que entrou/reentrou
+      socket.emit('room-state', {
+        players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+          id, playerId, name, score, isHost, online
+        })),
+        drawerId: room.currentDrawer,
+        round: room.round,
+        maxRounds: room.maxRounds,
+        status: room.status,
+        word: room.currentWord,
+        lines: room.lines,
+        timer: room._lastTimeLeft || 0,
+        podium: room.status === 'finished' ? [...room.players].sort((a, b) => b.score - a.score) : null
+      });
     } catch (error) {
       console.error('Erro ao entrar na sala:', error);
       callback({ success: false, error: 'Erro ao entrar na sala' });
@@ -242,6 +262,13 @@ io.on('connection', (socket) => {
         if (player) {
           // Marcar jogador como offline
           player.online = false;
+          // Se o jogador era o desenhista, notificar a sala
+          if (room.currentDrawer === player.id) {
+            io.to(roomCode).emit('drawer-left', {
+              drawerId: player.id,
+              drawerName: player.name
+            });
+          }
           // Emitir evento de jogador offline imediatamente
           io.to(roomCode).emit('player-offline', {
             playerId: playerId,
@@ -253,6 +280,8 @@ io.on('connection', (socket) => {
           player._removeTimeout = setTimeout(() => {
             // Remover jogador da sala
             room.players = room.players.filter(p => p.playerId !== playerId);
+            // Notificar o jogador removido, se possível
+            io.to(player.id).emit('removed-by-timeout');
             console.log(`${userName || socket.id} removido da sala ${roomCode} por timeout de reconexão`);
             // Se não sobrou ninguém, deletar a sala
             if (room.players.length === 0) {
@@ -265,6 +294,11 @@ io.on('connection', (socket) => {
               room.host = room.players[0].id;
               room.players[0].isHost = true;
               console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
+              // Notificar todos que houve mudança de host
+              io.to(roomCode).emit('host-left', {
+                newHostId: room.players[0].id,
+                newHostName: room.players[0].name
+              });
             }
             // Notificar os jogadores restantes
             io.to(roomCode).emit('player-left', {
