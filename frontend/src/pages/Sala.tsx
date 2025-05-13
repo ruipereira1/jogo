@@ -8,6 +8,7 @@ interface Player {
   name: string;
   score: number;
   isHost: boolean;
+  online?: boolean;
 }
 
 function Sala() {
@@ -44,6 +45,9 @@ function Sala() {
   const [lastJoined, setLastJoined] = useState<string | null>(null);
   const [lastLeft, setLastLeft] = useState<string | null>(null);
   const [showWebViewWarning, setShowWebViewWarning] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   let canvasWidth, canvasHeight;
   if (window.innerWidth < 640) { // Mobile
@@ -174,6 +178,10 @@ function Sala() {
       setIsGameStarted(false);
     });
 
+    socket.on('player-offline', ({ players }) => {
+      setPlayers(players);
+    });
+
     setIsLoading(false);
 
     return () => {
@@ -190,6 +198,7 @@ function Sala() {
       socket.off('game-ended');
       socket.off('game-restarted');
       socket.off('room-state');
+      socket.off('player-offline');
     };
   }, [roomCode, navigate]);
 
@@ -391,6 +400,30 @@ function Sala() {
     if (isInWebView()) setShowWebViewWarning(true);
   }, []);
 
+  // Redirecionar se não houver nome guardado
+  React.useEffect(() => {
+    const nomeGuardado = localStorage.getItem('nomeJogador');
+    if (!nomeGuardado && roomCode) {
+      navigate(`/entrar-sala?codigo=${roomCode}`);
+    }
+  }, [roomCode, navigate]);
+
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    const handleDisconnect = () => {
+      setIsReconnecting(true);
+    };
+    const handleConnect = () => {
+      setIsReconnecting(false);
+    };
+    socket.on('disconnect', handleDisconnect);
+    socket.on('connect', handleConnect);
+    return () => {
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect', handleConnect);
+    };
+  }, []);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400">
@@ -415,40 +448,56 @@ function Sala() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-900 to-blue-400 text-white p-0" style={{overflow: 'hidden'}}>
+      {isReconnecting && (
+        <div className="fixed top-0 left-0 w-full bg-yellow-400 text-blue-900 text-center py-2 z-50 font-bold animate-pulse">
+          Ligação perdida. A tentar reconectar...
+        </div>
+      )}
       <div className="flex-1 flex items-center justify-center w-full">
         <div className="w-full flex flex-col items-center justify-center">
-        <div className="flex items-center gap-2 mb-6">
-          <h1 className="text-xl sm:text-2xl font-bold w-full break-words text-center">Sala: {roomCode}</h1>
-          <button
-            className="bg-yellow-300 text-blue-900 px-2 py-1 rounded font-bold shadow hover:bg-yellow-400 transition text-sm"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(roomCode || '');
-              } catch (err) {
-                alert('Não foi possível copiar o código da sala.');
-              }
-            }}
-            title="Copiar código da sala"
-          >
-            Copiar
-          </button>
+        <div className="w-full flex flex-col sm:flex-row items-center justify-center gap-2 mb-6">
+          <h1 className="text-xl sm:text-2xl font-bold w-full break-words text-center mb-2 sm:mb-0">Sala: {roomCode}</h1>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto justify-center items-center p-2 bg-blue-900/30 rounded-lg shadow-md max-w-xs sm:max-w-none">
+            <button
+              className="bg-green-400 text-white px-3 py-2 rounded font-bold shadow hover:bg-green-500 transition text-sm flex items-center gap-1 w-full sm:w-auto"
+              onClick={() => {
+                const url = `https://desenharapido.netlify.app/entrar-sala?codigo=${roomCode}`;
+                const texto = `Junta-te à minha sala! Clica aqui para entrar: ${url}`;
+                const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(texto)}`;
+                window.open(whatsappUrl, '_blank');
+              }}
+              title="Partilhar no WhatsApp"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20.52 3.48A12.07 12.07 0 0 0 12 0C5.37 0 0 5.37 0 12a11.93 11.93 0 0 0 1.64 6L0 24l6.26-1.64A12.07 12.07 0 0 0 12 24c6.63 0 12-5.37 12-12a11.93 11.93 0 0 0-3.48-8.52zM12 22a9.93 9.93 0 0 1-5.13-1.41l-.37-.22-3.72.98.99-3.62-.24-.37A9.93 9.93 0 1 1 12 22zm5.47-7.14c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.27-.47-2.42-1.5-.9-.8-1.5-1.77-1.67-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.5-.5-.67-.5h-.57c-.2 0-.52.07-.8.37-.27.3-1.05 1.02-1.05 2.5 0 1.47 1.07 2.9 1.22 3.1.15.2 2.1 3.2 5.1 4.37.71.31 1.26.5 1.69.64.71.23 1.36.2 1.87.12.57-.08 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.08-.12-.27-.2-.57-.35z"/>
+              </svg>
+              WhatsApp
+            </button>
+            <span className="bg-blue-800 text-white px-3 py-2 rounded-lg font-semibold shadow text-center text-sm w-full sm:w-auto">Jogadores: {players.length}</span>
+          </div>
         </div>
-        <div className="flex justify-between items-center mb-6">
-          <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow ml-4">
+        {(copied || linkCopied) && (
+          <div className="mb-2 text-green-300 text-sm font-bold text-center">
+            {copied && 'Código copiado!'}
+            {linkCopied && 'Link copiado!'}
+          </div>
+        )}
+        <div className="w-full flex flex-col sm:flex-row justify-end items-center gap-2 mb-6">
+          <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow ml-0 sm:ml-4 mb-2 sm:mb-0">
             Jogadores na sala: {players.length}
           </span>
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto justify-end">
             {isCurrentUserHost && !isGameStarted && (
               <button
                 onClick={handleStartGame}
-                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
+                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition w-full sm:w-auto"
               >
                 Iniciar Jogo
               </button>
             )}
             <button 
               onClick={handleLeaveRoom}
-              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition"
+              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition w-full sm:w-auto"
             >
               Sair da Sala
             </button>
@@ -464,7 +513,15 @@ function Sala() {
                 key={player.id} 
                 className={`flex items-center gap-2 p-2 bg-white/10 rounded ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}`}
               >
-                <span className="flex-1">{player.name}</span>
+                <span className="flex-1 flex items-center gap-2">
+                  {player.name}
+                  {player.online === false && (
+                    <span title="Offline" className="ml-1 text-xs text-red-400 flex items-center gap-1">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="red" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="5" r="5"/></svg>
+                      offline
+                    </span>
+                  )}
+                </span>
                 <span className="text-yellow-300">{player.score} pts</span>
                 {player.isHost && (
                   <span className="bg-yellow-300 text-blue-900 text-xs px-2 py-1 rounded">HOST</span>
@@ -520,27 +577,6 @@ function Sala() {
                 >
                   Apagar desenho
                 </button>
-                  <button
-                    onClick={() => {
-                      const elem = document.documentElement;
-                      if (elem.requestFullscreen) {
-                        elem.requestFullscreen();
-                      } else if ((elem as any).webkitRequestFullscreen) {
-                        (elem as any).webkitRequestFullscreen();
-                      } else if ((elem as any).msRequestFullscreen) {
-                        (elem as any).msRequestFullscreen();
-                      }
-                    }}
-                    className="bg-blue-700 text-white px-4 py-2 rounded mb-2 ml-2 hover:bg-blue-800 transition"
-                    style={{marginBottom: '0.5rem'}}
-                  >
-                    Ecrã Inteiro
-                  </button>
-                  {showWebViewWarning && (
-                    <div className="bg-yellow-400 text-blue-900 rounded px-3 py-2 mt-2 text-sm font-bold shadow animate-pulse">
-                      O modo ecrã inteiro não é suportado nesta aplicação. <br />Abre no browser do telemóvel para melhor experiência!
-                    </div>
-                  )}
                 <p className="text-sm opacity-70">Desenhe algo relacionado à palavra!</p>
               </>
             ) : (
@@ -575,27 +611,6 @@ function Sala() {
                   onTouchMove={handleTouchMove}
                   onTouchEnd={handleTouchEnd}
                 />
-                  <button
-                    onClick={() => {
-                      const elem = document.documentElement;
-                      if (elem.requestFullscreen) {
-                        elem.requestFullscreen();
-                      } else if ((elem as any).webkitRequestFullscreen) {
-                        (elem as any).webkitRequestFullscreen();
-                      } else if ((elem as any).msRequestFullscreen) {
-                        (elem as any).msRequestFullscreen();
-                      }
-                    }}
-                    className="bg-blue-700 text-white px-4 py-2 rounded mb-2 ml-2 hover:bg-blue-800 transition"
-                    style={{marginBottom: '0.5rem'}}
-                  >
-                    Ecrã Inteiro
-                  </button>
-                  {showWebViewWarning && (
-                    <div className="bg-yellow-400 text-blue-900 rounded px-3 py-2 mt-2 text-sm font-bold shadow animate-pulse">
-                      O modo ecrã inteiro não é suportado nesta aplicação. <br />Abre no browser do telemóvel para melhor experiência!
-                    </div>
-                  )}
                 <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
                 {/* Campo de palpite */}
                 <form onSubmit={handleGuessSubmit} className="flex flex-col sm:flex-row gap-4 mt-4 w-full justify-center">
@@ -748,34 +763,6 @@ function Sala() {
             </div>
           </div>
         )}
-
-          {isDrawer && isMobile && isPortrait && !podium && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: '100vw',
-              height: '100vh',
-              background: 'rgba(0,0,0,0.7)',
-              zIndex: 1000,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontSize: '1.5rem',
-              textAlign: 'center',
-              padding: '2rem'
-            }}>
-              <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginBottom: '1rem'}}>
-                <rect x="10" y="30" width="60" height="20" rx="6" fill="#FFD600" stroke="white" strokeWidth="4"/>
-                <polygon points="70,40 80,35 80,45" fill="white"/>
-                <polygon points="10,40 0,35 0,45" fill="white"/>
-                <rect x="30" y="35" width="20" height="10" rx="2" fill="#222"/>
-              </svg>
-              <div>Para desenhar melhor, gira o telemóvel para <b>horizontal</b>!</div>
-            </div>
-          )}
 
           {lastJoined && (
             <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded shadow-lg z-[9999] font-bold text-lg animate-bounce">
