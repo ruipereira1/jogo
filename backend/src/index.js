@@ -79,7 +79,9 @@ function startRound(room, io) {
       });
       // Enviar atualização de jogadores para todos
       io.to(room.id).emit('players-update', {
-        players: room.players,
+        players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+          id, playerId, name, score, isHost, online
+        })),
         drawerId: drawer.id,
         round: room.round,
         maxRounds: room.maxRounds
@@ -110,7 +112,11 @@ function nextRoundOrEnd(room, io) {
     setTimeout(() => startRound(room, io), 2000); // Espera 2s antes de nova ronda
   } else {
     room.status = 'finished';
-    io.to(room.id).emit('game-ended', { players: room.players });
+    io.to(room.id).emit('game-ended', {
+      players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+        id, playerId, name, score, isHost, online
+      }))
+    });
   }
 }
 
@@ -210,7 +216,9 @@ io.on('connection', (socket) => {
       io.to(roomCode).emit('player-joined', {
         playerId: socket.data.playerId,
         playerName: userName,
-        players: room.players
+        players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+          id, playerId, name, score, isHost, online
+        }))
       });
 
       callback({ success: true });
@@ -237,7 +245,9 @@ io.on('connection', (socket) => {
           // Emitir evento de jogador offline imediatamente
           io.to(roomCode).emit('player-offline', {
             playerId: playerId,
-            players: room.players
+            players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+              id, playerId, name, score, isHost, online
+            }))
           });
           // Timeout de 120s para remoção definitiva
           player._removeTimeout = setTimeout(() => {
@@ -259,7 +269,9 @@ io.on('connection', (socket) => {
             // Notificar os jogadores restantes
             io.to(roomCode).emit('player-left', {
               playerId: playerId,
-              players: room.players
+              players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+                id, playerId, name, score, isHost, online
+              }))
             });
           }, 120000); // 120 segundos
         }
@@ -332,7 +344,9 @@ io.on('connection', (socket) => {
       if (drawer) drawer.score += drawerPoints;
       // Atualizar todos os jogadores com a nova lista de pontuações
       io.to(roomCode).emit('players-update', {
-        players: room.players,
+        players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+          id, playerId, name, score, isHost, online
+        })),
         drawerId: room.currentDrawer,
         round: room.round,
         maxRounds: room.maxRounds
