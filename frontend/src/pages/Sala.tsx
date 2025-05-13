@@ -43,6 +43,7 @@ function Sala() {
   const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
   const [lastJoined, setLastJoined] = useState<string | null>(null);
   const [lastLeft, setLastLeft] = useState<string | null>(null);
+  const [showWebViewWarning, setShowWebViewWarning] = useState(false);
 
   let canvasWidth, canvasHeight;
   if (window.innerWidth < 640) { // Mobile
@@ -68,6 +69,23 @@ function Sala() {
       navigate('/');
       return;
     }
+
+    // Pedir estado completo da sala ao entrar/reconectar
+    socket.emit('request-room-state', { roomCode });
+
+    // Receber estado completo da sala
+    socket.on('room-state', (state) => {
+      setPlayers(state.players || []);
+      setDrawerId(state.drawerId || null);
+      setRound(state.round || 1);
+      setMaxRounds(state.maxRounds || 1);
+      setIsGameStarted(state.status === 'playing');
+      setWord(state.word || null);
+      setLines(state.lines || []);
+      setTimer(state.timer || 0);
+      if (state.podium) setPodium(state.podium);
+      else setPodium(null);
+    });
 
     // Ouvir eventos do socket
     socket.on('player-joined', ({ players, playerName }) => {
@@ -171,6 +189,7 @@ function Sala() {
       socket.off('countdown');
       socket.off('game-ended');
       socket.off('game-restarted');
+      socket.off('room-state');
     };
   }, [roomCode, navigate]);
 
@@ -360,6 +379,18 @@ function Sala() {
     };
   }, []);
 
+  // Função para detetar se está em WebView/app
+  function isInWebView() {
+    const ua = navigator.userAgent || navigator.vendor || (typeof window !== 'undefined' && (window as any).opera) || '';
+    return (
+      /(FBAN|FBAV|Instagram|Line|Twitter|WebView|wv)/i.test(ua) ||
+      (typeof navigator !== 'undefined' && 'standalone' in navigator && (navigator as any).standalone === false)
+    );
+  }
+  useEffect(() => {
+    if (isInWebView()) setShowWebViewWarning(true);
+  }, []);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400">
@@ -386,295 +417,337 @@ function Sala() {
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-blue-900 to-blue-400 text-white p-0" style={{overflow: 'hidden'}}>
       <div className="flex-1 flex items-center justify-center w-full">
         <div className="w-full flex flex-col items-center justify-center">
-          <div className="flex items-center gap-2 mb-6">
-            <h1 className="text-xl sm:text-2xl font-bold w-full break-words text-center">Sala: {roomCode}</h1>
-            <button
-              className="bg-yellow-300 text-blue-900 px-2 py-1 rounded font-bold shadow hover:bg-yellow-400 transition text-sm"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(roomCode || '');
-                } catch (err) {
-                  alert('Não foi possível copiar o código da sala.');
-                }
-              }}
-              title="Copiar código da sala"
+        <div className="flex items-center gap-2 mb-6">
+          <h1 className="text-xl sm:text-2xl font-bold w-full break-words text-center">Sala: {roomCode}</h1>
+          <button
+            className="bg-yellow-300 text-blue-900 px-2 py-1 rounded font-bold shadow hover:bg-yellow-400 transition text-sm"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(roomCode || '');
+              } catch (err) {
+                alert('Não foi possível copiar o código da sala.');
+              }
+            }}
+            title="Copiar código da sala"
+          >
+            Copiar
+          </button>
+        </div>
+        <div className="flex justify-between items-center mb-6">
+          <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow ml-4">
+            Jogadores na sala: {players.length}
+          </span>
+          <div className="flex gap-2">
+            {isCurrentUserHost && !isGameStarted && (
+              <button
+                onClick={handleStartGame}
+                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
+              >
+                Iniciar Jogo
+              </button>
+            )}
+            <button 
+              onClick={handleLeaveRoom}
+              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition"
             >
-              Copiar
+              Sair da Sala
             </button>
           </div>
-          <div className="flex justify-between items-center mb-6">
-            <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow ml-4">
-              Jogadores na sala: {players.length}
-            </span>
-            <div className="flex gap-2">
-              {isCurrentUserHost && !isGameStarted && (
-                <button
-                  onClick={handleStartGame}
-                  className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
-                >
-                  Iniciar Jogo
-                </button>
-              )}
-              <button 
-                onClick={handleLeaveRoom}
-                className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition"
+        </div>
+
+        {/* Lista de jogadores */}
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 mb-6">
+          <h2 className="font-semibold mb-3">Jogadores ({players.length})</h2>
+          <ul className="space-y-2 max-h-40 overflow-y-auto sm:max-h-64 w-full">
+            {players.map(player => (
+              <li 
+                key={player.id} 
+                className={`flex items-center gap-2 p-2 bg-white/10 rounded ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}`}
               >
-                Sair da Sala
+                <span className="flex-1">{player.name}</span>
+                <span className="text-yellow-300">{player.score} pts</span>
+                {player.isHost && (
+                  <span className="bg-yellow-300 text-blue-900 text-xs px-2 py-1 rounded">HOST</span>
+                )}
+                {drawerId === player.id && (
+                  <span className="bg-green-300 text-blue-900 text-xs px-2 py-1 rounded ml-2">DESENHISTA</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 text-sm text-yellow-200">Ronda: {round}</div>
+        </div>
+
+        {/* Lobby (temporário - futuramente será o canvas de desenho) */}
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
+          {isGameStarted ? (
+            isDrawer ? (
+              <>
+                <p className="text-xl mb-2 text-green-300 font-bold">Você é o desenhista!</p>
+                <p className="text-2xl mb-4">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-2 py-1 rounded">{word}</span></p>
+                <canvas
+                  ref={canvasRef}
+                  width={canvasWidth}
+                  height={canvasHeight}
+                    style={{
+                      width: '100vw',
+                      height: canvasHeight,
+                      maxWidth: '100vw',
+                      maxHeight: '70vh',
+                      display: 'block',
+                      margin: '0 auto',
+                      border: '2px solid #FFD600',
+                      background: 'white',
+                      borderRadius: '0.5rem',
+                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
+                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
+                      touchAction: 'none',
+                      userSelect: 'none',
+                      boxSizing: 'border-box',
+                      overflow: 'hidden'
+                    }}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseLeave}
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                />
+                <button
+                  onClick={handleClearCanvas}
+                  className="bg-red-500 text-white px-4 py-2 rounded mb-2 hover:bg-red-600 transition"
+                >
+                  Apagar desenho
+                </button>
+                  <button
+                    onClick={() => {
+                      const elem = document.documentElement;
+                      if (elem.requestFullscreen) {
+                        elem.requestFullscreen();
+                      } else if ((elem as any).webkitRequestFullscreen) {
+                        (elem as any).webkitRequestFullscreen();
+                      } else if ((elem as any).msRequestFullscreen) {
+                        (elem as any).msRequestFullscreen();
+                      }
+                    }}
+                    className="bg-blue-700 text-white px-4 py-2 rounded mb-2 ml-2 hover:bg-blue-800 transition"
+                    style={{marginBottom: '0.5rem'}}
+                  >
+                    Ecrã Inteiro
+                  </button>
+                  {showWebViewWarning && (
+                    <div className="bg-yellow-400 text-blue-900 rounded px-3 py-2 mt-2 text-sm font-bold shadow animate-pulse">
+                      O modo ecrã inteiro não é suportado nesta aplicação. <br />Abre no browser do telemóvel para melhor experiência!
+                    </div>
+                  )}
+                <p className="text-sm opacity-70">Desenhe algo relacionado à palavra!</p>
+              </>
+            ) : (
+              <>
+                <p className="text-xl mb-4 text-blue-200 font-bold">Aguardando o desenhista começar a desenhar...</p>
+                <canvas
+                  ref={canvasRef}
+                  width={canvasWidth}
+                  height={canvasHeight}
+                    style={{
+                      width: '100vw',
+                      height: canvasHeight,
+                      maxWidth: '100vw',
+                      maxHeight: '70vh',
+                      display: 'block',
+                      margin: '0 auto',
+                      border: '2px solid #FFD600',
+                      background: 'white',
+                      borderRadius: '0.5rem',
+                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
+                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
+                      touchAction: 'none',
+                      userSelect: 'none',
+                      boxSizing: 'border-box',
+                      overflow: 'hidden'
+                    }}
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseLeave}
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                />
+                  <button
+                    onClick={() => {
+                      const elem = document.documentElement;
+                      if (elem.requestFullscreen) {
+                        elem.requestFullscreen();
+                      } else if ((elem as any).webkitRequestFullscreen) {
+                        (elem as any).webkitRequestFullscreen();
+                      } else if ((elem as any).msRequestFullscreen) {
+                        (elem as any).msRequestFullscreen();
+                      }
+                    }}
+                    className="bg-blue-700 text-white px-4 py-2 rounded mb-2 ml-2 hover:bg-blue-800 transition"
+                    style={{marginBottom: '0.5rem'}}
+                  >
+                    Ecrã Inteiro
+                  </button>
+                  {showWebViewWarning && (
+                    <div className="bg-yellow-400 text-blue-900 rounded px-3 py-2 mt-2 text-sm font-bold shadow animate-pulse">
+                      O modo ecrã inteiro não é suportado nesta aplicação. <br />Abre no browser do telemóvel para melhor experiência!
+                    </div>
+                  )}
+                <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
+                {/* Campo de palpite */}
+                <form onSubmit={handleGuessSubmit} className="flex flex-col sm:flex-row gap-4 mt-4 w-full justify-center">
+                  <input
+                    type="text"
+                    className="w-full p-3 rounded text-blue-900 text-base sm:text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                    placeholder={guessedCorrectly ? "Você já acertou!" : "Digite seu palpite..."}
+                    value={guess}
+                    onChange={e => setGuess(e.target.value)}
+                    disabled={guessedCorrectly}
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full sm:w-auto py-3 px-4 text-lg font-semibold rounded shadow transition mb-2 sm:mb-0 focus:outline-none focus:ring-2 focus:ring-yellow-400 bg-yellow-300 text-blue-900 hover:bg-yellow-400"
+                    disabled={guessedCorrectly}
+                  >
+                    Enviar
+                  </button>
+                </form>
+                {/* Feed de palpites */}
+                <div className="mt-4 max-h-40 overflow-y-auto bg-white/20 rounded p-2 text-left">
+                  {guesses.map((g, i) => (
+                    <div key={i} className={g.correct ? "text-green-300 font-bold" : "text-white"}>
+                      <span className="font-semibold">{g.name}:</span> {g.text}
+                      {g.correct && <span className="ml-2 bg-green-300 text-blue-900 px-2 py-1 rounded text-xs">ACERTOU!</span>}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
+          ) : (
+            <>
+              <p className="text-xl mb-4">Aguardando início do jogo...</p>
+              <p className="text-sm opacity-70">
+                Em breve: o canvas de desenho e a lógica de jogo aparecerão aqui!
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Cronómetro da ronda */}
+        {isGameStarted && (
+          <div className="mb-4 text-2xl font-bold text-yellow-300">Tempo restante: {timer}s</div>
+        )}
+
+        {winnerName && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+            <div className="bg-green-500 text-white text-4xl font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse">
+              {winnerName} acertou a palavra!
+            </div>
+          </div>
+        )}
+
+        {/* Mensagem de fim de ronda */}
+        {roundEnded && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+            <div className="bg-red-500 text-white text-3xl font-extrabold px-10 py-6 rounded-xl shadow-2xl border-4 border-white animate-pulse">
+              Tempo esgotado! A ronda terminou.
+            </div>
+          </div>
+        )}
+
+        {/* Countdown antes da ronda */}
+        {countdown !== null && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+            <div className="flex flex-col items-center">
+              {/* Número do countdown sempre em destaque no topo */}
+              <div className={`order-1 font-extrabold rounded-xl shadow-2xl border-4 border-white mb-2
+                  flex items-center justify-center
+                text-3xl px-4 py-4 w-full max-w-xs mx-auto
+                sm:text-7xl sm:px-16 sm:py-10 sm:max-w-none
+                ${round === maxRounds ? 'bg-gradient-to-r from-pink-500 via-yellow-400 to-red-500 text-white animate-bounce' : 'bg-blue-800 text-white animate-pulse'}`}
+                  style={{ minHeight: '4rem' }}
+              >
+                {countdown}
+              </div>
+              {/* Info da ronda */}
+              <div className="order-2 text-2xl font-bold text-yellow-200 mb-2">
+                Ronda: {round} de {maxRounds}
+              </div>
+              {/* Mensagem especial só na última ronda e só durante o countdown, super perceptível */}
+              {isLastRoundCountdown && (
+                <div className="order-3 fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+                  <div className="relative flex flex-col items-center w-full max-w-xs sm:max-w-lg mx-auto">
+                    <div className="absolute inset-0 bg-black/80 rounded-xl animate-pulse"></div>
+                    <div className="relative z-10 px-4 py-4 sm:px-12 sm:py-8 rounded-xl border-8 border-pink-400 shadow-2xl bg-gradient-to-r from-yellow-400 via-pink-500 to-red-500 animate-bounce flex flex-col items-center w-full max-w-xs sm:max-w-lg mx-auto">
+                      <span className="text-2xl sm:text-7xl font-extrabold text-white drop-shadow-lg mb-4 flex items-center gap-4">
+                        <span role='img' aria-label='trophy'>🏆</span>
+                        ÚLTIMA RONDA!
+                        <span role='img' aria-label='trophy'>🏆</span>
+                      </span>
+                      <span className="text-base sm:text-2xl text-yellow-100 font-bold mt-2 text-center">Dê o seu melhor, esta é a última chance!</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Pódio final */}
+        {podium && (
+            <div className="fixed inset-0 flex items-center justify-center z-[9999] bg-black/90" style={{pointerEvents: 'auto'}}>
+            <div className="bg-yellow-300 text-blue-900 rounded-xl shadow-2xl p-10 flex flex-col items-center animate-pulse border-4 border-white">
+              <h2 className="text-4xl font-extrabold mb-6">🏆 Pódio Final 🏆</h2>
+              <ol className="text-2xl font-bold space-y-2 mb-4">
+                {podium.slice(0, 3).map((player, idx) => (
+                  <li key={player.id} className={idx === 0 ? 'text-4xl text-yellow-600' : idx === 1 ? 'text-3xl text-gray-700' : 'text-2xl text-orange-700'}>
+                    {idx === 0 && '🥇 '}
+                    {idx === 1 && '🥈 '}
+                    {idx === 2 && '🥉 '}
+                    {player.name} — {player.score} pts
+                  </li>
+                ))}
+              </ol>
+              <div className="text-lg mt-2 mb-4">Parabéns a todos!</div>
+              {isCurrentUserHost && (
+                <div className="flex flex-col items-center gap-2 mt-4">
+                  <span className="text-blue-900 font-semibold mb-1">Selecione o número de rondas para a próxima partida:</span>
+                  <label className="text-blue-900 font-bold">Número de rondas:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={newRounds}
+                    onChange={e => setNewRounds(Number(e.target.value))}
+                    className="p-2 rounded text-blue-900 w-24 text-center"
+                  />
+                  <button
+                    className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold mt-2 hover:bg-green-700 transition"
+                    onClick={() => {
+                      socketService.getSocket().emit('restart-game', { roomCode, rounds: newRounds });
+                      setPodium(null);
+                    }}
+                  >
+                    Iniciar nova partida
+                  </button>
+                </div>
+              )}
+              {!isCurrentUserHost && (
+                <div className="text-blue-900 font-bold mt-4">Aguardando o host iniciar uma nova partida...</div>
+              )}
+              <button
+                className="bg-red-600 text-white px-6 py-2 rounded-lg font-bold mt-6 hover:bg-red-700 transition"
+                onClick={handleLeaveRoom}
+              >
+                Sair
               </button>
             </div>
           </div>
-
-          {/* Lista de jogadores */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 mb-6">
-            <h2 className="font-semibold mb-3">Jogadores ({players.length})</h2>
-            <ul className="space-y-2 max-h-40 overflow-y-auto sm:max-h-64 w-full">
-              {players.map(player => (
-                <li 
-                  key={player.id} 
-                  className={`flex items-center gap-2 p-2 bg-white/10 rounded ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}`}
-                >
-                  <span className="flex-1">{player.name}</span>
-                  <span className="text-yellow-300">{player.score} pts</span>
-                  {player.isHost && (
-                    <span className="bg-yellow-300 text-blue-900 text-xs px-2 py-1 rounded">HOST</span>
-                  )}
-                  {drawerId === player.id && (
-                    <span className="bg-green-300 text-blue-900 text-xs px-2 py-1 rounded ml-2">DESENHISTA</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <div className="mt-2 text-sm text-yellow-200">Ronda: {round}</div>
-          </div>
-
-          {/* Lobby (temporário - futuramente será o canvas de desenho) */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
-            {isGameStarted ? (
-              isDrawer ? (
-                <>
-                  <p className="text-xl mb-2 text-green-300 font-bold">Você é o desenhista!</p>
-                  <p className="text-2xl mb-4">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-2 py-1 rounded">{word}</span></p>
-                  <canvas
-                    ref={canvasRef}
-                    width={canvasWidth}
-                    height={canvasHeight}
-                    style={{
-                      width: '100vw',
-                      height: canvasHeight,
-                      maxWidth: '100vw',
-                      maxHeight: '70vh',
-                      display: 'block',
-                      margin: '0 auto',
-                      border: '2px solid #FFD600',
-                      background: 'white',
-                      borderRadius: '0.5rem',
-                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
-                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
-                      touchAction: 'none',
-                      userSelect: 'none',
-                      boxSizing: 'border-box',
-                      overflow: 'hidden'
-                    }}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseLeave}
-                    onTouchStart={handleTouchStart}
-                    onTouchMove={handleTouchMove}
-                    onTouchEnd={handleTouchEnd}
-                  />
-                  <button
-                    onClick={handleClearCanvas}
-                    className="bg-red-500 text-white px-4 py-2 rounded mb-2 hover:bg-red-600 transition"
-                  >
-                    Apagar desenho
-                  </button>
-                  <p className="text-sm opacity-70">Desenhe algo relacionado à palavra!</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-xl mb-4 text-blue-200 font-bold">Aguardando o desenhista começar a desenhar...</p>
-                  <canvas
-                    ref={canvasRef}
-                    width={canvasWidth}
-                    height={canvasHeight}
-                    style={{
-                      width: '100vw',
-                      height: canvasHeight,
-                      maxWidth: '100vw',
-                      maxHeight: '70vh',
-                      display: 'block',
-                      margin: '0 auto',
-                      border: '2px solid #FFD600',
-                      background: 'white',
-                      borderRadius: '0.5rem',
-                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
-                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
-                      touchAction: 'none',
-                      userSelect: 'none',
-                      boxSizing: 'border-box',
-                      overflow: 'hidden'
-                    }}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseLeave}
-                    onTouchStart={handleTouchStart}
-                    onTouchMove={handleTouchMove}
-                    onTouchEnd={handleTouchEnd}
-                  />
-                  <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
-                  {/* Campo de palpite */}
-                  <form onSubmit={handleGuessSubmit} className="flex flex-col sm:flex-row gap-4 mt-4 w-full justify-center">
-                    <input
-                      type="text"
-                      className="w-full p-3 rounded text-blue-900 text-base sm:text-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                      placeholder={guessedCorrectly ? "Você já acertou!" : "Digite seu palpite..."}
-                      value={guess}
-                      onChange={e => setGuess(e.target.value)}
-                      disabled={guessedCorrectly}
-                      autoComplete="off"
-                    />
-                    <button
-                      type="submit"
-                      className="w-full sm:w-auto py-3 px-4 text-lg font-semibold rounded shadow transition mb-2 sm:mb-0 focus:outline-none focus:ring-2 focus:ring-yellow-400 bg-yellow-300 text-blue-900 hover:bg-yellow-400"
-                      disabled={guessedCorrectly}
-                    >
-                      Enviar
-                    </button>
-                  </form>
-                  {/* Feed de palpites */}
-                  <div className="mt-4 max-h-40 overflow-y-auto bg-white/20 rounded p-2 text-left">
-                    {guesses.map((g, i) => (
-                      <div key={i} className={g.correct ? "text-green-300 font-bold" : "text-white"}>
-                        <span className="font-semibold">{g.name}:</span> {g.text}
-                        {g.correct && <span className="ml-2 bg-green-300 text-blue-900 px-2 py-1 rounded text-xs">ACERTOU!</span>}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )
-            ) : (
-              <>
-                <p className="text-xl mb-4">Aguardando início do jogo...</p>
-                <p className="text-sm opacity-70">
-                  Em breve: o canvas de desenho e a lógica de jogo aparecerão aqui!
-                </p>
-              </>
-            )}
-          </div>
-
-          {/* Cronómetro da ronda */}
-          {isGameStarted && (
-            <div className="mb-4 text-2xl font-bold text-yellow-300">Tempo restante: {timer}s</div>
-          )}
-
-          {winnerName && (
-            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-              <div className="bg-green-500 text-white text-4xl font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse">
-                {winnerName} acertou a palavra!
-              </div>
-            </div>
-          )}
-
-          {/* Mensagem de fim de ronda */}
-          {roundEnded && (
-            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-              <div className="bg-red-500 text-white text-3xl font-extrabold px-10 py-6 rounded-xl shadow-2xl border-4 border-white animate-pulse">
-                Tempo esgotado! A ronda terminou.
-              </div>
-            </div>
-          )}
-
-          {/* Countdown antes da ronda */}
-          {countdown !== null && (
-            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-              <div className="flex flex-col items-center">
-                {/* Número do countdown sempre em destaque no topo */}
-                <div className={`order-1 font-extrabold rounded-xl shadow-2xl border-4 border-white mb-2
-                  flex items-center justify-center
-                  text-3xl px-4 py-4 w-full max-w-xs mx-auto
-                  sm:text-7xl sm:px-16 sm:py-10 sm:max-w-none
-                  ${round === maxRounds ? 'bg-gradient-to-r from-pink-500 via-yellow-400 to-red-500 text-white animate-bounce' : 'bg-blue-800 text-white animate-pulse'}`}
-                  style={{ minHeight: '4rem' }}
-                >
-                  {countdown}
-                </div>
-                {/* Info da ronda */}
-                <div className="order-2 text-2xl font-bold text-yellow-200 mb-2">
-                  Ronda: {round} de {maxRounds}
-                </div>
-                {/* Mensagem especial só na última ronda e só durante o countdown, super perceptível */}
-                {isLastRoundCountdown && (
-                  <div className="order-3 fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-                    <div className="relative flex flex-col items-center w-full max-w-xs sm:max-w-lg mx-auto">
-                      <div className="absolute inset-0 bg-black/80 rounded-xl animate-pulse"></div>
-                      <div className="relative z-10 px-4 py-4 sm:px-12 sm:py-8 rounded-xl border-8 border-pink-400 shadow-2xl bg-gradient-to-r from-yellow-400 via-pink-500 to-red-500 animate-bounce flex flex-col items-center w-full max-w-xs sm:max-w-lg mx-auto">
-                        <span className="text-2xl sm:text-7xl font-extrabold text-white drop-shadow-lg mb-4 flex items-center gap-4">
-                          <span role='img' aria-label='trophy'>🏆</span>
-                          ÚLTIMA RONDA!
-                          <span role='img' aria-label='trophy'>🏆</span>
-                        </span>
-                        <span className="text-base sm:text-2xl text-yellow-100 font-bold mt-2 text-center">Dê o seu melhor, esta é a última chance!</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Pódio final */}
-          {podium && (
-            <div className="fixed inset-0 flex items-center justify-center z-[9999] bg-black/90" style={{pointerEvents: 'auto'}}>
-              <div className="bg-yellow-300 text-blue-900 rounded-xl shadow-2xl p-10 flex flex-col items-center animate-pulse border-4 border-white">
-                <h2 className="text-4xl font-extrabold mb-6">🏆 Pódio Final 🏆</h2>
-                <ol className="text-2xl font-bold space-y-2 mb-4">
-                  {podium.slice(0, 3).map((player, idx) => (
-                    <li key={player.id} className={idx === 0 ? 'text-4xl text-yellow-600' : idx === 1 ? 'text-3xl text-gray-700' : 'text-2xl text-orange-700'}>
-                      {idx === 0 && '🥇 '}
-                      {idx === 1 && '🥈 '}
-                      {idx === 2 && '🥉 '}
-                      {player.name} — {player.score} pts
-                    </li>
-                  ))}
-                </ol>
-                <div className="text-lg mt-2 mb-4">Parabéns a todos!</div>
-                {isCurrentUserHost && (
-                  <div className="flex flex-col items-center gap-2 mt-4">
-                    <span className="text-blue-900 font-semibold mb-1">Selecione o número de rondas para a próxima partida:</span>
-                    <label className="text-blue-900 font-bold">Número de rondas:</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={newRounds}
-                      onChange={e => setNewRounds(Number(e.target.value))}
-                      className="p-2 rounded text-blue-900 w-24 text-center"
-                    />
-                    <button
-                      className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold mt-2 hover:bg-green-700 transition"
-                      onClick={() => {
-                        socketService.getSocket().emit('restart-game', { roomCode, rounds: newRounds });
-                        setPodium(null);
-                      }}
-                    >
-                      Iniciar nova partida
-                    </button>
-                  </div>
-                )}
-                {!isCurrentUserHost && (
-                  <div className="text-blue-900 font-bold mt-4">Aguardando o host iniciar uma nova partida...</div>
-                )}
-                <button
-                  className="bg-red-600 text-white px-6 py-2 rounded-lg font-bold mt-6 hover:bg-red-700 transition"
-                  onClick={handleLeaveRoom}
-                >
-                  Sair
-                </button>
-              </div>
-            </div>
-          )}
+        )}
 
           {isDrawer && isMobile && isPortrait && !podium && (
             <div style={{
