@@ -173,9 +173,10 @@ io.on('connection', (socket) => {
       }
 
       if (existingPlayer) {
-        // Jogador está a reentrar: atualizar socket.id e nome
+        // Jogador está a reentrar: atualizar socket.id, nome e marcar como online
         existingPlayer.id = socket.id;
         existingPlayer.name = userName;
+        existingPlayer.online = true;
         // Cancelar timeout de remoção se existir
         if (existingPlayer._removeTimeout) {
           clearTimeout(existingPlayer._removeTimeout);
@@ -192,7 +193,8 @@ io.on('connection', (socket) => {
           playerId: playerId || socket.id,
           name: userName,
           score: 0,
-          isHost: false
+          isHost: false,
+          online: true
         });
       }
 
@@ -230,7 +232,14 @@ io.on('connection', (socket) => {
         // Encontrar jogador pelo playerId
         const player = room.players.find(p => p.playerId === playerId);
         if (player) {
-          // Timeout de 20s para reconexão
+          // Marcar jogador como offline
+          player.online = false;
+          // Emitir evento de jogador offline imediatamente
+          io.to(roomCode).emit('player-offline', {
+            playerId: playerId,
+            players: room.players
+          });
+          // Timeout de 120s para remoção definitiva
           player._removeTimeout = setTimeout(() => {
             // Remover jogador da sala
             room.players = room.players.filter(p => p.playerId !== playerId);
@@ -249,7 +258,7 @@ io.on('connection', (socket) => {
             }
             // Notificar os jogadores restantes
             io.to(roomCode).emit('player-left', {
-              playerId: socket.id,
+              playerId: playerId,
               players: room.players
             });
           }, 120000); // 120 segundos
