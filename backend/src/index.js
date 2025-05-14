@@ -359,8 +359,14 @@ io.on('connection', (socket) => {
   });
 
   // Receber traço do desenhista e repassar para a sala
-  socket.on('draw-line', ({ roomCode, line, point }) => {
-    console.log('Recebido draw-line:', { roomCode, temLine: !!line, temPoint: !!point });
+  socket.on('draw-line', ({ roomCode, line, point, color, width }) => {
+    console.log('Recebido draw-line:', { 
+      roomCode, 
+      temLine: !!line, 
+      temPoint: !!point,
+      color: color,
+      width: width
+    });
     if (!roomCode || (!line && !point)) return;
     const room = rooms.get(roomCode);
     if (!room) {
@@ -387,6 +393,10 @@ io.on('connection', (socket) => {
         console.log('Adicionados pontos pendentes à linha:', pending.length);
       }
       
+      // Garantir que a linha tenha as propriedades color e width
+      if (!line.color && color) line.color = color;
+      if (!line.width && width) line.width = width;
+      
       // Salvar linha e emitir para todos na sala
       room.lines.push(line);
       io.to(roomCode).emit('draw-line', { line });
@@ -395,16 +405,29 @@ io.on('connection', (socket) => {
       // Recebemos um ponto individual
       if (room.lines.length === 0) {
         // Se não temos linhas, criamos uma nova linha com este ponto
-        room.lines.push({ points: [point] });
-        io.to(roomCode).emit('draw-line', { line: { points: [point] } });
+        const newLine = { 
+          points: [point],
+          color: color || '#222', 
+          width: width || 3
+        };
+        room.lines.push(newLine);
+        io.to(roomCode).emit('draw-line', { line: newLine });
         console.log('Criada nova linha com ponto inicial');
       } else {
         // Adicionamos o ponto à última linha
         if (!room.lines[room.lines.length - 1].points) {
           room.lines[room.lines.length - 1].points = [];
         }
+        // Garantimos que a linha já possui cor e espessura, ou atualizamos
+        if (!room.lines[room.lines.length - 1].color && color) {
+          room.lines[room.lines.length - 1].color = color;
+        }
+        if (!room.lines[room.lines.length - 1].width && width) {
+          room.lines[room.lines.length - 1].width = width;
+        }
+        
         room.lines[room.lines.length - 1].points.push(point);
-        io.to(roomCode).emit('draw-line', { point });
+        io.to(roomCode).emit('draw-line', { point, color, width });
         console.log('Ponto adicionado à linha existente e enviado');
       }
     }

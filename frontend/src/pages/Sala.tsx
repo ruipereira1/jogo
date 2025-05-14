@@ -54,6 +54,8 @@ function Sala() {
   const [removedByTimeout, setRemovedByTimeout] = useState(false);
   const [pendingPoints, setPendingPoints] = useState<any[]>([]);
   const pendingPointsRef = useRef<any[]>([]);
+  const [strokeColor, setStrokeColor] = useState('#000000');
+  const [strokeWidth, setStrokeWidth] = useState(3);
 
   // Ref para garantir valor atualizado de drawing
   const drawingRef = useRef(false);
@@ -161,7 +163,11 @@ function Sala() {
           if (prev.length === 0) {
             // Se não temos linhas, criamos uma nova com este ponto
             console.log('CRIANDO NOVA LINHA PARA PONTO RECEBIDO:', data.point);
-            return [...prev, { points: [data.point] }];
+            return [...prev, { 
+              points: [data.point],
+              color: data.color || '#222',
+              width: data.width || 3
+            }];
           } else {
             // Caso contrário, adicionamos o ponto à última linha
             const newLines = [...prev];
@@ -311,9 +317,9 @@ function Sala() {
     const rect = canvasRef.current!.getBoundingClientRect();
     const xNorm = (e.clientX - rect.left) / rect.width;
     const yNorm = (e.clientY - rect.top) / rect.height;
-    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }] }]); // Atualiza localmente
+    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }], color: strokeColor, width: strokeWidth }]); // Atualiza localmente
     const socket = socketService.getSocket();
-    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm } });
+    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm }, color: strokeColor, width: strokeWidth });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -329,7 +335,7 @@ function Sala() {
       return newLines;
     });
     const socket = socketService.getSocket();
-    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm } });
+    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm }, color: strokeColor, width: strokeWidth });
   };
 
   const handleMouseUp = () => {
@@ -341,7 +347,7 @@ function Sala() {
     // Enviar a linha completa ao finalizar o traço
     if (lines.length > 0) {
       const lastLine = lines[lines.length - 1];
-      socket.emit('draw-line', { roomCode, line: lastLine });
+      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
       console.log('Enviada linha completa ao finalizar traço (mouse)', lastLine);
     }
   };
@@ -357,7 +363,7 @@ function Sala() {
     const touch = e.touches[0];
     const xNorm = (touch.clientX - rect.left) / rect.width;
     const yNorm = (touch.clientY - rect.top) / rect.height;
-    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }] }]);
+    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }], color: strokeColor, width: strokeWidth }]);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -386,7 +392,7 @@ function Sala() {
     // Enviar a linha completa ao finalizar o traço
     if (lines.length > 0) {
       const lastLine = lines[lines.length - 1];
-      socket.emit('draw-line', { roomCode, line: lastLine });
+      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
       console.log('Enviada linha completa ao finalizar traço (touch)', lastLine);
     }
   };
@@ -400,7 +406,7 @@ function Sala() {
     if (drawingRef.current && lines.length > 0) {
       const socket = socketService.getSocket();
       const lastLine = lines[lines.length - 1];
-      socket.emit('draw-line', { roomCode, line: lastLine });
+      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
       console.log('Enviada linha completa ao sair do canvas', lastLine);
       drawingRef.current = false;
     }
@@ -648,7 +654,7 @@ function Sala() {
                       console.log('EMITINDO DRAW-LINE PARA O BACKEND:', point);
                       setLines(prev => {
                         if (!prev.length || !drawing) {
-                          const novaLinha = { points: [point] };
+                          const novaLinha = { points: [point], color: strokeColor, width: strokeWidth };
                           console.log('NOVA LINHA LOCAL:', novaLinha);
                           return [...prev, novaLinha];
                         } else {
@@ -659,7 +665,7 @@ function Sala() {
                         }
                       });
                       const socket = socketService.getSocket();
-                      socket.emit('draw-line', { roomCode, point });
+                      socket.emit('draw-line', { roomCode, point, color: strokeColor, width: strokeWidth });
                     }
                   }}
                   onStartLine={() => {
@@ -671,10 +677,14 @@ function Sala() {
                     if (isDrawer && lines.length > 0) {
                       const socket = socketService.getSocket();
                       const lastLine = lines[lines.length - 1];
-                      socket.emit('draw-line', { roomCode, line: lastLine });
+                      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
                       console.log('Enviada linha completa ao finalizar traço (desenhista)', lastLine);
                     }
                   }}
+                  strokeColor={strokeColor}
+                  strokeWidth={strokeWidth}
+                  onColorChange={setStrokeColor}
+                  onWidthChange={setStrokeWidth}
                 />
                 <button
                   onClick={handleClearCanvas}
@@ -695,7 +705,7 @@ function Sala() {
                       console.log('EMITINDO DRAW-LINE PARA O BACKEND:', point);
                       setLines(prev => {
                         if (!prev.length || !drawing) {
-                          const novaLinha = { points: [point] };
+                          const novaLinha = { points: [point], color: strokeColor, width: strokeWidth };
                           console.log('NOVA LINHA LOCAL:', novaLinha);
                           return [...prev, novaLinha];
                         } else {
@@ -706,7 +716,7 @@ function Sala() {
                         }
                       });
                       const socket = socketService.getSocket();
-                      socket.emit('draw-line', { roomCode, point });
+                      socket.emit('draw-line', { roomCode, point, color: strokeColor, width: strokeWidth });
                     }
                   }}
                   onStartLine={() => {
@@ -718,10 +728,12 @@ function Sala() {
                     if (isDrawer && lines.length > 0) {
                       const socket = socketService.getSocket();
                       const lastLine = lines[lines.length - 1];
-                      socket.emit('draw-line', { roomCode, line: lastLine });
+                      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
                       console.log('Enviada linha completa ao finalizar traço (espectador)', lastLine);
                     }
                   }}
+                  strokeColor={strokeColor}
+                  strokeWidth={strokeWidth}
                 />
                 <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
                 {/* Campo de palpite */}
