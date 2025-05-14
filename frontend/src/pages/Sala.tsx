@@ -968,7 +968,7 @@ function Sala() {
       {roundEnded && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
           <div className={`bg-red-500 text-white font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse ${deviceType === 'mobile' ? 'text-2xl' : 'text-4xl'}`}>
-            {winnerName} acertou a palavra!
+            Tempo esgotado!
           </div>
         </div>
       )}
