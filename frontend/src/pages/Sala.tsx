@@ -520,6 +520,12 @@ function Sala() {
                   className="w-24 p-2 rounded text-blue-900 text-center mx-auto"
                 />
               </div>
+              <button
+                onClick={handleStartGame}
+                className="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 transition text-lg font-bold shadow flex items-center justify-center gap-2 mx-auto"
+              >
+                <span role="img" aria-label="play">▶️</span> Iniciar Jogo
+              </button>
             </div>
           )}
           <p className="text-sm opacity-70 mt-4">
@@ -689,14 +695,6 @@ function Sala() {
               </svg>
               <span>{deviceType === 'mobile' ? 'Convidar' : 'Convidar amigos'}</span>
             </button>
-            {isCurrentUserHost && !isGameStarted && (
-              <button
-                onClick={handleStartGame}
-                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition text-sm font-bold shadow flex items-center gap-1"
-              >
-                <span role="img" aria-label="play">▶️</span> {deviceType === 'mobile' ? 'Iniciar' : 'Iniciar Jogo'}
-              </button>
-            )}
           </div>
           <button
             onClick={handleLeaveRoom}
