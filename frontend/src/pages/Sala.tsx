@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socketService from '../services/socket';
 import QRCode from 'react-qr-code';
+import DrawingCanvas from './DrawingCanvas';
 
 interface Player {
   id: string;
@@ -138,6 +139,7 @@ function Sala() {
     // Receber linhas desenhadas de outros jogadores
     const handleDrawLine = (data: any) => {
       if (isDrawer) return; // O desenhista já desenhou localmente
+      console.log('RECEBIDO DRAW-LINE DO BACKEND:', data);
       if (data.point) {
         setLines(prev => {
           if (
@@ -145,11 +147,12 @@ function Sala() {
             !prev[prev.length - 1] ||
             !Array.isArray(prev[prev.length - 1].points)
           ) {
-            pendingPointsRef.current.push(data.point);
+            console.log('BUFFERIZADO PONTO (sem linha):', data.point);
             return prev;
           }
           const newLines = [...prev];
           newLines[newLines.length - 1].points.push(data.point);
+          console.log('ADICIONADO PONTO RECEBIDO À LINHA:', data.point, newLines);
           return newLines;
         });
       } else if (data.line) {
@@ -264,9 +267,28 @@ function Sala() {
   }, [maxRounds]);
 
   const handleLeaveRoom = () => {
-    // Desconectar do socket e voltar para home
+    setPlayers([]);
+    setLines([]);
+    setGuesses([]);
+    setPodium(null);
+    setWord(null);
+    setDrawerId(null);
+    setIsGameStarted(false);
+    setRound(1);
+    setTimer(0);
+    setWinnerName(null);
+    setGuessedCorrectly(false);
+    setCountdown(null);
+    setLastJoined(null);
+    setLastLeft(null);
+    setDrawerLeft(null);
+    setHostLeft(null);
+    setRemovedByTimeout(false);
+    setIsTouchDrawing(false);
+    setDrawing(false);
+    setError('');
     socketService.disconnect();
-    localStorage.removeItem('playerId'); // Limpa o playerId ao sair
+    localStorage.removeItem('playerId');
     navigate('/');
   };
 
@@ -593,34 +615,30 @@ function Sala() {
               <>
                 <p className="text-xl mb-2 text-green-300 font-bold">Você é o desenhista!</p>
                 <p className="text-2xl mb-4">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-2 py-1 rounded">{word}</span></p>
-                <canvas
-                  ref={canvasRef}
-                  width={canvasWidth}
-                  height={canvasHeight}
-                  style={{
-                    width: window.innerWidth < 640 ? '100vw' : '500px',
-                    height: canvasHeight,
-                    maxWidth: window.innerWidth < 640 ? '100vw' : '500px',
-                    maxHeight: '70vh',
-                    display: 'block',
-                    margin: '0 auto',
-                    border: '2px solid #FFD600',
-                    background: 'white',
-                    borderRadius: '0.5rem',
-                    marginBottom: window.innerWidth < 640 ? 0 : '1rem',
-                    cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
-                    touchAction: 'none',
-                    userSelect: 'none',
-                    boxSizing: 'border-box',
-                    overflow: 'hidden'
+                <DrawingCanvas
+                  lines={lines}
+                  isDrawer={isDrawer}
+                  onDraw={(point) => {
+                    if (isDrawer) {
+                      console.log('EMITINDO DRAW-LINE PARA O BACKEND:', point);
+                      setLines(prev => {
+                        if (!prev.length || !drawing) {
+                          const novaLinha = { points: [point] };
+                          console.log('NOVA LINHA LOCAL:', novaLinha);
+                          return [...prev, novaLinha];
+                        } else {
+                          const newLines = [...prev];
+                          newLines[newLines.length - 1].points.push(point);
+                          console.log('ADICIONANDO PONTO À LINHA LOCAL:', point, newLines);
+                          return newLines;
+                        }
+                      });
+                      const socket = socketService.getSocket();
+                      socket.emit('draw-line', { roomCode, point });
+                    }
                   }}
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseLeave}
-                  onTouchStart={handleTouchStart}
-                  onTouchMove={handleTouchMove}
-                  onTouchEnd={handleTouchEnd}
+                  onStartLine={() => setDrawing(true)}
+                  onEndLine={() => setDrawing(false)}
                 />
                 <button
                   onClick={handleClearCanvas}
@@ -633,34 +651,30 @@ function Sala() {
             ) : (
               <>
                 <p className="text-xl mb-4 text-blue-200 font-bold">Aguardando o desenhista começar a desenhar...</p>
-                <canvas
-                  ref={canvasRef}
-                  width={canvasWidth}
-                  height={canvasHeight}
-                  style={{
-                    width: window.innerWidth < 640 ? '100vw' : '500px',
-                    height: canvasHeight,
-                    maxWidth: window.innerWidth < 640 ? '100vw' : '500px',
-                    maxHeight: '70vh',
-                    display: 'block',
-                    margin: '0 auto',
-                    border: '2px solid #FFD600',
-                    background: 'white',
-                    borderRadius: '0.5rem',
-                    marginBottom: window.innerWidth < 640 ? 0 : '1rem',
-                    cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
-                    touchAction: 'none',
-                    userSelect: 'none',
-                    boxSizing: 'border-box',
-                    overflow: 'hidden'
+                <DrawingCanvas
+                  lines={lines}
+                  isDrawer={isDrawer}
+                  onDraw={(point) => {
+                    if (isDrawer) {
+                      console.log('EMITINDO DRAW-LINE PARA O BACKEND:', point);
+                      setLines(prev => {
+                        if (!prev.length || !drawing) {
+                          const novaLinha = { points: [point] };
+                          console.log('NOVA LINHA LOCAL:', novaLinha);
+                          return [...prev, novaLinha];
+                        } else {
+                          const newLines = [...prev];
+                          newLines[newLines.length - 1].points.push(point);
+                          console.log('ADICIONANDO PONTO À LINHA LOCAL:', point, newLines);
+                          return newLines;
+                        }
+                      });
+                      const socket = socketService.getSocket();
+                      socket.emit('draw-line', { roomCode, point });
+                    }
                   }}
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseLeave}
-                  onTouchStart={handleTouchStart}
-                  onTouchMove={handleTouchMove}
-                  onTouchEnd={handleTouchEnd}
+                  onStartLine={() => setDrawing(true)}
+                  onEndLine={() => setDrawing(false)}
                 />
                 <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
                 {/* Campo de palpite */}
