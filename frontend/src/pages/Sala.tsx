@@ -585,6 +585,59 @@ function Sala() {
 
   // Função para renderizar a área do jogo em diferentes layouts
   const renderGameArea = () => {
+    // Mostrar pódio quando o jogo acabou
+    if (podium) {
+      return (
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
+          <h2 className="text-2xl font-bold text-yellow-300 mb-4">🏆 Fim do Jogo 🏆</h2>
+          
+          <div className="bg-blue-900/50 rounded-lg p-4 mb-4">
+            <h3 className="text-xl font-bold mb-3 text-white">Pontuações Finais</h3>
+            
+            <div className="grid gap-3">
+              {podium.map((player, index) => (
+                <div 
+                  key={player.id} 
+                  className={`flex items-center p-3 rounded-lg ${
+                    index === 0 ? 'bg-yellow-500/50 text-white' : 
+                    index === 1 ? 'bg-gray-400/50 text-white' : 
+                    index === 2 ? 'bg-amber-700/50 text-white' : 
+                    'bg-white/10'
+                  }`}
+                >
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="font-bold text-xl">{index + 1}º</span>
+                    <span className="truncate">{player.name}</span>
+                    {player.isHost && (
+                      <span className="bg-yellow-300 text-blue-900 text-xs px-1 py-0.5 rounded ml-1">HOST</span>
+                    )}
+                  </div>
+                  <span className="text-2xl font-bold text-yellow-300">{player.score} pts</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          {isCurrentUserHost && (
+            <button
+              onClick={() => {
+                socketService.getSocket().emit('restart-game', { roomCode, rounds: newRounds });
+              }}
+              className="bg-green-500 text-white px-6 py-3 mt-2 rounded-lg hover:bg-green-600 transition text-lg font-bold shadow flex items-center justify-center gap-2 mx-auto"
+            >
+              <span role="img" aria-label="recomeçar">🔄</span> Reiniciar Jogo
+            </button>
+          )}
+          
+          {!isCurrentUserHost && (
+            <p className="text-sm text-center mt-4 italic">
+              Aguardando o host iniciar um novo jogo...
+            </p>
+          )}
+        </div>
+      );
+    }
+    
     if (!isGameStarted) {
       return (
         <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
