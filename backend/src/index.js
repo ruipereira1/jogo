@@ -50,6 +50,9 @@ const WORDS_DIFICIL = [
   'microscópio', 'paralelepípedo', 'ornitorrinco', 'helicóptero', 'canguru', 'escaravelho', 'anfíbio', 'estetoscópio', 'circuito', 'criptografia', 'maracujá', 'turbilhão', 'girassol', 'crocodilo', 'escafandro', 'bumerangue', 'trombone', 'saxofone', 'candelabro', 'ampulheta'
 ];
 
+// Buffer de pontos pendentes por sala
+const pendingPointsByRoom = new Map();
+
 // Função para gerar código aleatório de 6 caracteres
 function generateRoomCode() {
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -304,6 +307,7 @@ io.on('connection', (socket) => {
             // Se não sobrou ninguém, deletar a sala
             if (room.players.length === 0) {
               rooms.delete(roomCode);
+              pendingPointsByRoom.delete(roomCode); // Limpa buffer de pontos pendentes
               console.log(`Sala ${roomCode} deletada pois ficou vazia`);
               return;
             }
@@ -356,17 +360,35 @@ io.on('connection', (socket) => {
 
   // Receber traço do desenhista e repassar para a sala
   socket.on('draw-line', ({ roomCode, line, point }) => {
+    console.log('Recebido draw-line:', { roomCode, temLine: !!line, temPoint: !!point });
     if (!roomCode || (!line && !point)) return;
     const room = rooms.get(roomCode);
-    if (!room) return;
+    if (!room) {
+      console.log('Sala não encontrada:', roomCode);
+      return;
+    }
     if (line) {
+      // Se houver pontos pendentes, adiciona-os à linha
+      const pending = pendingPointsByRoom.get(roomCode) || [];
+      if (pending.length > 0) {
+        if (!line.points) line.points = [];
+        line.points.push(...pending);
+        pendingPointsByRoom.set(roomCode, []);
+        console.log('Adicionados pontos pendentes à linha:', pending.length);
+      }
       room.lines.push(line);
-      socket.to(roomCode).emit('draw-line', line);
+      io.to(roomCode).emit('draw-line', line);
     } else if (point) {
-      // Adicionar ponto à última linha
-      if (room.lines.length === 0) return;
+      if (room.lines.length === 0) {
+        // Guarda ponto no buffer até a linha chegar
+        let pending = pendingPointsByRoom.get(roomCode) || [];
+        pending.push(point);
+        pendingPointsByRoom.set(roomCode, pending);
+        console.log('Ponto guardado no buffer, aguardando linha inicial.');
+        return;
+      }
       room.lines[room.lines.length - 1].points.push(point);
-      socket.to(roomCode).emit('draw-line', { point });
+      io.to(roomCode).emit('draw-line', { point });
     }
   });
 
@@ -432,7 +454,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room) return;
     room.lines = [];
-    socket.to(roomCode).emit('clear-canvas');
+    io.to(roomCode).emit('clear-canvas');
   });
 
   // Reiniciar partida

@@ -51,6 +51,11 @@ function Sala() {
   const [drawerLeft, setDrawerLeft] = useState<string | null>(null);
   const [hostLeft, setHostLeft] = useState<string | null>(null);
   const [removedByTimeout, setRemovedByTimeout] = useState(false);
+  const [pendingPoints, setPendingPoints] = useState<any[]>([]);
+  const pendingPointsRef = useRef<any[]>([]);
+
+  // Ref para garantir valor atualizado de drawing
+  const drawingRef = useRef(false);
 
   let canvasWidth, canvasHeight;
   if (window.innerWidth < 640) { // Mobile
@@ -99,12 +104,16 @@ function Sala() {
       setPlayers(players);
       setLastJoined(playerName);
       setTimeout(() => setLastJoined(null), 3000);
+      // Garantir sincronização total:
+      socket.emit('request-room-state', { roomCode });
     });
 
     socket.on('player-left', ({ players, playerName }) => {
       setPlayers(players);
       setLastLeft(playerName);
       setTimeout(() => setLastLeft(null), 3000);
+      // Pedir estado completo da sala para garantir sincronização
+      socket.emit('request-room-state', { roomCode });
     });
 
     socket.on('players-update', ({ players, drawerId, round, maxRounds }) => {
@@ -127,9 +136,34 @@ function Sala() {
     });
 
     // Receber linhas desenhadas de outros jogadores
-    socket.on('draw-line', (line) => {
-      setLines(prev => [...prev, line]);
-    });
+    const handleDrawLine = (data: any) => {
+      if (isDrawer) return; // O desenhista já desenhou localmente
+      if (data.point) {
+        setLines(prev => {
+          if (
+            prev.length === 0 ||
+            !prev[prev.length - 1] ||
+            !Array.isArray(prev[prev.length - 1].points)
+          ) {
+            pendingPointsRef.current.push(data.point);
+            return prev;
+          }
+          const newLines = [...prev];
+          newLines[newLines.length - 1].points.push(data.point);
+          return newLines;
+        });
+      } else if (data.line) {
+        setLines(prev => {
+          const newLines = [...prev, data.line];
+          if (pendingPointsRef.current.length > 0) {
+            newLines[newLines.length - 1].points.push(...pendingPointsRef.current);
+            pendingPointsRef.current = [];
+          }
+          return newLines;
+        });
+      }
+    };
+    socket.on('draw-line', handleDrawLine);
 
     socket.on('guess', ({ name, text, correct }) => {
       setGuesses(prev => [...prev, { name, text, correct }]);
@@ -232,6 +266,7 @@ function Sala() {
   const handleLeaveRoom = () => {
     // Desconectar do socket e voltar para home
     socketService.disconnect();
+    localStorage.removeItem('playerId'); // Limpa o playerId ao sair
     navigate('/');
   };
 
@@ -243,27 +278,27 @@ function Sala() {
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!isDrawer || isTouchDrawing) return;
     setDrawing(true);
+    drawingRef.current = true;
     const rect = canvasRef.current!.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const xNorm = x / canvasRef.current!.width;
-    const yNorm = y / canvasRef.current!.height;
-    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }] }]);
+    const xNorm = (e.clientX - rect.left) / rect.width;
+    const yNorm = (e.clientY - rect.top) / rect.height;
+    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }] }]); // Atualiza localmente
+    const socket = socketService.getSocket();
+    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm } });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawer || !drawing || isTouchDrawing) return;
+    if (!isDrawer || !drawingRef.current || isTouchDrawing) return;
     const rect = canvasRef.current!.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const xNorm = x / canvasRef.current!.width;
-    const yNorm = y / canvasRef.current!.height;
+    const xNorm = (e.clientX - rect.left) / rect.width;
+    const yNorm = (e.clientY - rect.top) / rect.height;
     setLines(prev => {
+      if (prev.length === 0) return prev;
       const newLines = [...prev];
+      if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
       newLines[newLines.length - 1].points.push({ x: xNorm, y: yNorm });
       return newLines;
     });
-    // Enviar ponto em tempo real
     const socket = socketService.getSocket();
     socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm } });
   };
@@ -271,11 +306,9 @@ function Sala() {
   const handleMouseUp = () => {
     if (!isDrawer || isTouchDrawing) return;
     setDrawing(false);
+    drawingRef.current = false;
     const socket = socketService.getSocket();
-    const lastLine = lines[lines.length - 1];
-    if (lastLine) {
-      socket.emit('draw-line', { roomCode, line: lastLine });
-    }
+    // O estado 'lines' será atualizado apenas ao receber do servidor para espectadores
   };
 
   // Funções de toque para desenhar no mobile
@@ -287,10 +320,8 @@ function Sala() {
     setDrawing(true);
     const rect = canvasRef.current!.getBoundingClientRect();
     const touch = e.touches[0];
-    const x = (touch.clientX - rect.left) / rect.width * canvasWidth;
-    const y = (touch.clientY - rect.top) / rect.height * canvasHeight;
-    const xNorm = x / canvasWidth;
-    const yNorm = y / canvasHeight;
+    const xNorm = (touch.clientX - rect.left) / rect.width;
+    const yNorm = (touch.clientY - rect.top) / rect.height;
     setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }] }]);
   };
 
@@ -300,12 +331,12 @@ function Sala() {
     e.stopPropagation();
     const rect = canvasRef.current!.getBoundingClientRect();
     const touch = e.touches[0];
-    const x = (touch.clientX - rect.left) / rect.width * canvasWidth;
-    const y = (touch.clientY - rect.top) / rect.height * canvasHeight;
-    const xNorm = x / canvasWidth;
-    const yNorm = y / canvasHeight;
+    const xNorm = (touch.clientX - rect.left) / rect.width;
+    const yNorm = (touch.clientY - rect.top) / rect.height;
     setLines(prev => {
+      if (prev.length === 0) return prev;
       const newLines = [...prev];
+      if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
       newLines[newLines.length - 1].points.push({ x: xNorm, y: yNorm });
       return newLines;
     });
@@ -335,33 +366,39 @@ function Sala() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Ajustar para alta resolução
-    const dpr = window.devicePixelRatio || 1;
-    // Guardar tamanhos lógicos
-    const logicalWidth = canvasWidth;
-    const logicalHeight = canvasHeight;
-    canvas.width = logicalWidth * dpr;
-    canvas.height = logicalHeight * dpr;
-    canvas.style.width = logicalWidth + 'px';
-    canvas.style.height = logicalHeight + 'px';
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
-    ctx.scale(dpr, dpr);
+    try {
+      // Ajustar para alta resolução
+      const dpr = window.devicePixelRatio || 1;
+      // Guardar tamanhos lógicos
+      const logicalWidth = canvasWidth;
+      const logicalHeight = canvasHeight;
+      canvas.width = logicalWidth * dpr;
+      canvas.height = logicalHeight * dpr;
+      canvas.style.width = logicalWidth + 'px';
+      canvas.style.height = logicalHeight + 'px';
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+      ctx.scale(dpr, dpr);
 
-    ctx.clearRect(0, 0, logicalWidth, logicalHeight);
-    ctx.strokeStyle = '#222';
-    // Largura do traço maior no mobile
-    ctx.lineWidth = window.innerWidth < 640 ? 6 : 3;
-    ctx.lineCap = 'round';
-    lines.forEach(line => {
-      ctx.beginPath();
-      line.points.forEach((pt: any, i: number) => {
-        const x = pt.x * logicalWidth;
-        const y = pt.y * logicalHeight;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+      ctx.clearRect(0, 0, logicalWidth, logicalHeight);
+      ctx.strokeStyle = '#222';
+      // Largura do traço maior no mobile
+      ctx.lineWidth = window.innerWidth < 640 ? 6 : 3;
+      ctx.lineCap = 'round';
+      lines.forEach(line => {
+        if (!line.points || !Array.isArray(line.points)) return;
+        ctx.beginPath();
+        line.points.forEach((pt: any, i: number) => {
+          if (typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
+          const x = pt.x * logicalWidth;
+          const y = pt.y * logicalHeight;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
       });
-      ctx.stroke();
-    });
+    } catch (err) {
+      console.error('Erro ao desenhar no canvas:', err);
+    }
   }, [lines, isDrawer, canvasWidth, canvasHeight, isTouchDrawing]);
 
   const handleGuessSubmit = (e: React.FormEvent) => {
@@ -376,27 +413,6 @@ function Sala() {
     setLines([]);
     socketService.getSocket().emit('clear-canvas', { roomCode });
   };
-
-  // Ao receber draw-line, adicionar ponto à última linha
-  useEffect(() => {
-    const socket = socketService.getSocket();
-    const handleDrawLine = (data: any) => {
-      if (data.point) {
-        setLines(prev => {
-          if (prev.length === 0) return prev;
-          const newLines = [...prev];
-          newLines[newLines.length - 1].points.push(data.point);
-          return newLines;
-        });
-      } else if (data.line) {
-        setLines(prev => [...prev, data.line]);
-      }
-    };
-    socket.on('draw-line', handleDrawLine);
-    return () => {
-      socket.off('draw-line', handleDrawLine);
-    };
-  }, [roomCode]);
 
   useEffect(() => {
     function handleResize() {
@@ -446,6 +462,11 @@ function Sala() {
     };
   }, []);
 
+  // Diagnóstico: logar sempre que isDrawer muda
+  useEffect(() => {
+    console.log('isDrawer mudou:', isDrawer);
+  }, [isDrawer]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400">
@@ -491,11 +512,13 @@ function Sala() {
       )}
       <div className="flex-1 flex items-center justify-center w-full">
         <div className="w-full flex flex-col items-center justify-center">
-        <div className="w-full flex flex-col sm:flex-row items-center justify-center gap-2 mb-6">
-          <h1 className="text-xl sm:text-2xl font-bold w-full break-words text-center mb-2 sm:mb-0">Sala: {roomCode}</h1>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto justify-center items-center p-2 bg-blue-900/30 rounded-lg shadow-md max-w-xs sm:max-w-none">
+        <div className="flex flex-col items-center justify-center gap-1 mb-2">
+          <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow text-center text-sm flex items-center gap-1">
+            <span role="img" aria-label="jogadores">👥</span> {players.length}
+          </span>
+          <div className="flex flex-row gap-2 justify-center">
             <button
-              className="bg-green-400 text-white px-3 py-2 rounded font-bold shadow hover:bg-green-500 transition text-sm flex items-center gap-1 w-full sm:w-auto"
+              className="bg-green-400 text-white px-3 py-2 rounded font-bold shadow hover:bg-green-500 transition text-sm flex items-center gap-1"
               onClick={() => {
                 const url = `https://desenharapido.netlify.app/entrar-sala?codigo=${roomCode}`;
                 const texto = `Junta-te à minha sala! Clica aqui para entrar: ${url}`;
@@ -507,10 +530,23 @@ function Sala() {
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M20.52 3.48A12.07 12.07 0 0 0 12 0C5.37 0 0 5.37 0 12a11.93 11.93 0 0 0 1.64 6L0 24l6.26-1.64A12.07 12.07 0 0 0 12 24c6.63 0 12-5.37 12-12a11.93 11.93 0 0 0-3.48-8.52zM12 22a9.93 9.93 0 0 1-5.13-1.41l-.37-.22-3.72.98.99-3.62-.24-.37A9.93 9.93 0 1 1 12 22zm5.47-7.14c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.27-.47-2.42-1.5-.9-.8-1.5-1.77-1.67-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.5-.5-.67-.5h-.57c-.2 0-.52.07-.8.37-.27.3-1.05 1.02-1.05 2.5 0 1.47 1.07 2.9 1.22 3.1.15.2 2.1 3.2 5.1 4.37.71.31 1.26.5 1.69.64.71.23 1.36.2 1.87.12.57-.08 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.08-.12-.27-.2-.57-.35z"/>
               </svg>
-              WhatsApp
             </button>
-            <span className="bg-blue-800 text-white px-3 py-2 rounded-lg font-semibold shadow text-center text-sm w-full sm:w-auto">Jogadores: {players.length}</span>
+            {isCurrentUserHost && !isGameStarted && (
+              <button
+                onClick={handleStartGame}
+                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition text-sm font-bold shadow flex items-center gap-1"
+              >
+                <span role="img" aria-label="play">▶️</span> Iniciar Jogo
+              </button>
+            )}
+            <button
+              onClick={handleLeaveRoom}
+              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition text-sm font-bold shadow flex items-center gap-1"
+            >
+              <span role="img" aria-label="sair">🚪</span> Sair da Sala
+            </button>
           </div>
+          <h1 className="text-xl sm:text-2xl font-bold w-full break-words text-center mt-1">Sala: {roomCode}</h1>
         </div>
         {(copied || linkCopied) && (
           <div className="mb-2 text-green-300 text-sm font-bold text-center">
@@ -518,27 +554,6 @@ function Sala() {
             {linkCopied && 'Link copiado!'}
           </div>
         )}
-        <div className="w-full flex flex-col sm:flex-row justify-end items-center gap-2 mb-6">
-          <span className="bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold shadow ml-0 sm:ml-4 mb-2 sm:mb-0">
-            Jogadores na sala: {players.length}
-          </span>
-          <div className="flex gap-2 w-full sm:w-auto justify-end">
-            {isCurrentUserHost && !isGameStarted && (
-              <button
-                onClick={handleStartGame}
-                className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition w-full sm:w-auto"
-              >
-                Iniciar Jogo
-              </button>
-            )}
-            <button 
-              onClick={handleLeaveRoom}
-              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition w-full sm:w-auto"
-            >
-              Sair da Sala
-            </button>
-          </div>
-        </div>
 
         {/* Lista de jogadores */}
         <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 mb-6">
@@ -582,23 +597,23 @@ function Sala() {
                   ref={canvasRef}
                   width={canvasWidth}
                   height={canvasHeight}
-                    style={{
-                      width: '100vw',
-                      height: canvasHeight,
-                      maxWidth: '100vw',
-                      maxHeight: '70vh',
-                      display: 'block',
-                      margin: '0 auto',
-                      border: '2px solid #FFD600',
-                      background: 'white',
-                      borderRadius: '0.5rem',
-                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
-                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
-                      touchAction: 'none',
-                      userSelect: 'none',
-                      boxSizing: 'border-box',
-                      overflow: 'hidden'
-                    }}
+                  style={{
+                    width: window.innerWidth < 640 ? '100vw' : '500px',
+                    height: canvasHeight,
+                    maxWidth: window.innerWidth < 640 ? '100vw' : '500px',
+                    maxHeight: '70vh',
+                    display: 'block',
+                    margin: '0 auto',
+                    border: '2px solid #FFD600',
+                    background: 'white',
+                    borderRadius: '0.5rem',
+                    marginBottom: window.innerWidth < 640 ? 0 : '1rem',
+                    cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
+                    touchAction: 'none',
+                    userSelect: 'none',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden'
+                  }}
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
@@ -622,27 +637,27 @@ function Sala() {
                   ref={canvasRef}
                   width={canvasWidth}
                   height={canvasHeight}
-                    style={{
-                      width: '100vw',
-                      height: canvasHeight,
-                      maxWidth: '100vw',
-                      maxHeight: '70vh',
-                      display: 'block',
-                      margin: '0 auto',
-                      border: '2px solid #FFD600',
-                      background: 'white',
-                      borderRadius: '0.5rem',
-                      marginBottom: window.innerWidth < 640 ? 0 : '1rem',
-                      cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
-                      touchAction: 'none',
-                      userSelect: 'none',
-                      boxSizing: 'border-box',
-                      overflow: 'hidden'
-                    }}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onMouseLeave={handleMouseLeave}
+                  style={{
+                    width: window.innerWidth < 640 ? '100vw' : '500px',
+                    height: canvasHeight,
+                    maxWidth: window.innerWidth < 640 ? '100vw' : '500px',
+                    maxHeight: '70vh',
+                    display: 'block',
+                    margin: '0 auto',
+                    border: '2px solid #FFD600',
+                    background: 'white',
+                    borderRadius: '0.5rem',
+                    marginBottom: window.innerWidth < 640 ? 0 : '1rem',
+                    cursor: `url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"32\" viewBox=\"0 0 32 32\"><line x1=\"16\" y1=\"4\" x2=\"16\" y2=\"28\" stroke=\"black\" stroke-width=\"2\"/><line x1=\"4\" y1=\"16\" x2=\"28\" y2=\"16\" stroke=\"black\" stroke-width=\"2\"/></svg>') 16 16, crosshair`,
+                    touchAction: 'none',
+                    userSelect: 'none',
+                    boxSizing: 'border-box',
+                    overflow: 'hidden'
+                  }}
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseLeave}
                   onTouchStart={handleTouchStart}
                   onTouchMove={handleTouchMove}
                   onTouchEnd={handleTouchEnd}

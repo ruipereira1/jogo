@@ -38,16 +38,13 @@ class SocketService {
   setUser(user: { id: string; name: string }) {
     this.user = user;
     localStorage.setItem('nomeJogador', user.name);
-    localStorage.setItem('playerId', user.id);
   }
 
   getUser() {
     if (this.user) return this.user;
     const name = localStorage.getItem('nomeJogador');
-    const id = localStorage.getItem('playerId');
-    if (name && id) {
-      this.user = { id, name };
-      return this.user;
+    if (name) {
+      return { id: '', name };
     }
     return null;
   }
@@ -68,16 +65,8 @@ class SocketService {
 
   joinRoom(userName: string, roomCode: string, playerId?: string) {
     const socket = this.getSocket();
-    let id = playerId;
-    if (!id) {
-      id = localStorage.getItem('playerId') || '';
-      if (!id) {
-        id = socket.id ?? '';
-        localStorage.setItem('playerId', id);
-      }
-    }
     return new Promise<void>((resolve, reject) => {
-      socket.emit('join-room', { userName, roomCode, playerId: id }, (response: any) => {
+      socket.emit('join-room', { userName, roomCode }, (response: any) => {
         if (response.success) {
           this.setUser({ id: socket.id ?? '', name: userName });
           resolve();
