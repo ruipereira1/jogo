@@ -23,7 +23,7 @@ app.use(cors({
   credentials: true
 }));
 
-// Middleware para garantir os headers de CORS em todas as respostas
+// Middleware extra para garantir headers CORS em todas as respostas
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', FRONTEND_URL);
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
@@ -314,7 +314,7 @@ io.on('connection', (socket) => {
             // Se o host saiu, passar o controle para outro jogador
             if (room.host === socket.id) {
               room.host = room.players[0].id;
-              room.players[0].isHost = true;
+              room.players.forEach((p, idx) => p.isHost = idx === 0); // Só o novo host tem isHost: true
               console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
               // Notificar todos que houve mudança de host
               io.to(roomCode).emit('host-left', {
