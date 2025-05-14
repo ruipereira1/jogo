@@ -3,18 +3,33 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 
+const FRONTEND_URL = 'https://desenharapido.netlify.app';
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ['https://desenharapido.netlify.app'], // Domínio do Netlify
-    methods: ['GET', 'POST']
+    origin: [FRONTEND_URL],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true
   }
 });
 
 app.use(cors({
-  origin: ['https://desenharapido.netlify.app'] // Domínio do Netlify
+  origin: [FRONTEND_URL],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
 }));
+
+// Middleware para garantir os headers de CORS em todas as respostas
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', FRONTEND_URL);
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
+
 app.get('/', (req, res) => {
   res.send('Servidor ArteRápida rodando!');
 });
