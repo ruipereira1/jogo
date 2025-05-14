@@ -36,15 +36,20 @@ class SocketService {
   }
 
   setUser(user: { id: string; name: string }) {
-    this.user = user;
+    if (this.socket) {
+      this.user = { id: this.socket.id || '', name: user.name };
+    } else {
+      this.user = user;
+    }
     localStorage.setItem('nomeJogador', user.name);
   }
 
   getUser() {
-    if (this.user) return this.user;
-    const name = localStorage.getItem('nomeJogador');
+    const name = this.user?.name || localStorage.getItem('nomeJogador');
     if (name) {
-      return { id: '', name };
+      // Sempre usar o socket.id mais atual
+      const currentId = this.socket?.id || '';
+      return { id: currentId, name };
     }
     return null;
   }

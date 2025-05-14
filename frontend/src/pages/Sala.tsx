@@ -37,7 +37,8 @@ function Sala() {
   const [newRounds, setNewRounds] = useState(3);
   const [maxRounds, setMaxRounds] = useState<number>(1);
   const user = socketService.getUser();
-  const isCurrentUserHost = players.find(p => p.id === user?.id)?.isHost;
+  const socket = socketService.getSocket();
+  const isCurrentUserHost = players.find(p => p.id === socket.id)?.isHost;
   const [isLastRoundCountdown, setIsLastRoundCountdown] = useState(false);
   const isMobile = window.innerWidth < 640;
   const [isTouchDrawing, setIsTouchDrawing] = useState(false);
@@ -326,7 +327,12 @@ function Sala() {
   };
 
   const handleStartGame = () => {
-    socketService.getSocket().emit('start-game', { roomCode });
+    // Verificar se o usuário atual é o host antes de iniciar o jogo
+    if (isCurrentUserHost) {
+      socketService.getSocket().emit('start-game', { roomCode });
+    } else {
+      console.log('Apenas o host pode iniciar o jogo');
+    }
   };
 
   // Função para manipular o desenho (agora via DrawingCanvas)
