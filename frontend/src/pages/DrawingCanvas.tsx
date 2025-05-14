@@ -35,6 +35,7 @@ const DrawingCanvas: React.FC<Props> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const toolboxRef = useRef<HTMLDivElement | null>(null);
   const drawing = useRef(false);
   const lastPoint = useRef<Point | null>(null);
   const [showTools, setShowTools] = useState(false);
@@ -54,6 +55,29 @@ const DrawingCanvas: React.FC<Props> = ({
     
     return () => window.removeEventListener('resize', detectMobile);
   }, []);
+
+  // Fechar ferramentas quando clicar fora delas
+  useEffect(() => {
+    const handleClickOutside = (e: Event) => {
+      if (
+        showTools && 
+        toolboxRef.current && 
+        !toolboxRef.current.contains(e.target as Node) &&
+        canvasRef.current && 
+        !canvasRef.current.contains(e.target as Node)
+      ) {
+        setShowTools(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showTools]);
 
   // Prevenir scroll quando estiver desenhando em dispositivo móvel
   useEffect(() => {
@@ -254,8 +278,10 @@ const DrawingCanvas: React.FC<Props> = ({
     onEndLine && onEndLine();
   };
 
-  const toggleTools = () => {
+  const toggleTools = (e: React.MouseEvent) => {
     if (isDrawer) {
+      // Impedir que cliques dentro da caixa de ferramentas fechem ela
+      e.stopPropagation();
       setShowTools(!showTools);
     }
   };
@@ -304,7 +330,11 @@ const DrawingCanvas: React.FC<Props> = ({
       />
       
       {isDrawer && showTools && (
-        <div className="absolute bottom-2 left-2 right-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow flex flex-wrap gap-2 items-center">
+        <div 
+          ref={toolboxRef}
+          className="absolute bottom-2 left-2 right-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow flex flex-wrap gap-2 items-center"
+          onClick={(e) => e.stopPropagation()} // Evitar que cliques na caixa de ferramentas passem para o canvas
+        >
           <div className="flex gap-1 flex-wrap">
             {COLORS.map(color => (
               <button
@@ -349,7 +379,10 @@ const DrawingCanvas: React.FC<Props> = ({
         <div className="flex justify-between mt-2">
           <button 
             className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded"
-            onClick={() => setShowTools(!showTools)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowTools(!showTools);
+            }}
           >
             {showTools ? "Esconder ferramentas" : "Mostrar ferramentas"}
           </button>
