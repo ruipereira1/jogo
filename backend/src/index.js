@@ -12,7 +12,9 @@ const io = new Server(server, {
     origin: [FRONTEND_URL],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true
-  }
+  },
+  pingTimeout: 30000,    // 30 segundos
+  pingInterval: 10000    // 10 segundos
 });
 
 app.use(cors({
