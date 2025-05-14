@@ -34,9 +34,48 @@ const DrawingCanvas: React.FC<Props> = ({
   onWidthChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const drawing = useRef(false);
   const lastPoint = useRef<Point | null>(null);
   const [showTools, setShowTools] = useState(false);
+  const [isMobileDevice, setIsMobileDevice] = useState(false);
+  const [touchActive, setTouchActive] = useState(false);
+
+  // Detectar se é dispositivo móvel
+  useEffect(() => {
+    const detectMobile = () => {
+      const isMobile = window.innerWidth < 768 || 
+                       /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      setIsMobileDevice(isMobile);
+    };
+    
+    detectMobile();
+    window.addEventListener('resize', detectMobile);
+    
+    return () => window.removeEventListener('resize', detectMobile);
+  }, []);
+
+  // Prevenir scroll quando estiver desenhando em dispositivo móvel
+  useEffect(() => {
+    const preventScroll = (e: Event) => {
+      if (drawing.current && isDrawer) {
+        e.preventDefault();
+      }
+    };
+
+    const options = { passive: false };
+    
+    // Adicionar ao document para capturar em qualquer lugar
+    if (isDrawer) {
+      document.addEventListener('touchmove', preventScroll, options);
+      document.addEventListener('touchstart', preventScroll, options);
+    }
+    
+    return () => {
+      document.removeEventListener('touchmove', preventScroll);
+      document.removeEventListener('touchstart', preventScroll);
+    };
+  }, [isDrawer]);
 
   // Desenhar as linhas recebidas
   useEffect(() => {
@@ -94,10 +133,71 @@ const DrawingCanvas: React.FC<Props> = ({
     });
   }, [lines]);
 
-  // Handlers de desenho
-  const handlePointerDown = (e: React.PointerEvent) => {
+  const handleTouchStart = (e: React.TouchEvent) => {
     if (!isDrawer) return;
     e.preventDefault();
+    e.stopPropagation();
+    
+    const touch = e.touches[0];
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = (touch.clientX - rect.left) / rect.width;
+    const y = (touch.clientY - rect.top) / rect.height;
+    
+    drawing.current = true;
+    setTouchActive(true);
+    lastPoint.current = { x, y };
+    onStartLine && onStartLine();
+    onDraw?.({ x, y });
+    
+    // Desativar temporariamente o scroll da página
+    if (containerRef.current) {
+      containerRef.current.style.overflowY = 'hidden';
+      containerRef.current.style.touchAction = 'none';
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDrawer || !drawing.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const touch = e.touches[0];
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = (touch.clientX - rect.left) / rect.width;
+    const y = (touch.clientY - rect.top) / rect.height;
+    
+    // Se a distância é muito pequena, ignoramos para evitar pontos excedentes
+    if (lastPoint.current) {
+      const dx = Math.abs(x - lastPoint.current.x);
+      const dy = Math.abs(y - lastPoint.current.y);
+      if (dx < 0.003 && dy < 0.003) return;
+    }
+    
+    lastPoint.current = { x, y };
+    onDraw?.({ x, y });
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!isDrawer) return;
+    e.preventDefault();
+    
+    drawing.current = false;
+    setTouchActive(false);
+    lastPoint.current = null;
+    onEndLine && onEndLine();
+    
+    // Reativar o scroll da página
+    if (containerRef.current) {
+      containerRef.current.style.overflowY = '';
+      containerRef.current.style.touchAction = '';
+    }
+  };
+
+  // Handlers de desenho com mouse
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!isDrawer || e.pointerType === 'touch') return;
+    e.preventDefault();
+    
     drawing.current = true;
     onStartLine && onStartLine();
     
@@ -110,7 +210,7 @@ const DrawingCanvas: React.FC<Props> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDrawer || !drawing.current) return;
+    if (!isDrawer || !drawing.current || e.pointerType === 'touch') return;
     e.preventDefault();
     
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -129,8 +229,9 @@ const DrawingCanvas: React.FC<Props> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (!isDrawer) return;
+    if (!isDrawer || e.pointerType === 'touch') return;
     e.preventDefault();
+    
     drawing.current = false;
     lastPoint.current = null;
     onEndLine && onEndLine();
@@ -151,7 +252,17 @@ const DrawingCanvas: React.FC<Props> = ({
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
+      {isDrawer && touchActive && (
+        <div className="absolute inset-0 pointer-events-none z-10 border-4 border-yellow-300 rounded-lg opacity-50"></div>
+      )}
+      
+      {isDrawer && isMobileDevice && (
+        <div className="absolute top-2 left-2 right-2 bg-yellow-100 text-blue-900 px-2 py-1 rounded text-xs text-center">
+          Modo touch ativo - desenhe sem preocupação com scroll
+        </div>
+      )}
+      
       <canvas
         ref={canvasRef}
         width={500}
@@ -162,12 +273,16 @@ const DrawingCanvas: React.FC<Props> = ({
           background: 'white', 
           borderRadius: 8, 
           border: '2px solid #FFD600',
-          cursor: isDrawer ? 'crosshair' : 'default'
+          cursor: isDrawer ? 'crosshair' : 'default',
+          touchAction: isDrawer ? 'none' : 'auto' // Prevenir scroll em touch devices
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         onClick={toggleTools}
       />
       
@@ -177,7 +292,7 @@ const DrawingCanvas: React.FC<Props> = ({
             {COLORS.map(color => (
               <button
                 key={color}
-                className={`w-6 h-6 rounded-full ${color === strokeColor ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}
+                className={`w-8 h-8 rounded-full ${color === strokeColor ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}
                 style={{ backgroundColor: color }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -192,7 +307,7 @@ const DrawingCanvas: React.FC<Props> = ({
             {WIDTHS.map(width => (
               <button
                 key={width}
-                className={`w-6 h-6 rounded flex items-center justify-center bg-gray-100 ${width === strokeWidth ? 'ring-2 ring-blue-500' : ''}`}
+                className={`w-8 h-8 rounded flex items-center justify-center bg-gray-100 ${width === strokeWidth ? 'ring-2 ring-blue-500' : ''}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   handleWidthSelect(width);
@@ -214,13 +329,19 @@ const DrawingCanvas: React.FC<Props> = ({
       )}
       
       {isDrawer && (
-        <div className="flex justify-center mt-1">
+        <div className="flex justify-between mt-2">
           <button 
             className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded"
             onClick={() => setShowTools(!showTools)}
           >
             {showTools ? "Esconder ferramentas" : "Mostrar ferramentas"}
           </button>
+          
+          {isMobileDevice && (
+            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+              Modo desenho {touchActive ? 'ativo' : 'pronto'}
+            </span>
+          )}
         </div>
       )}
     </div>

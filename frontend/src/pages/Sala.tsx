@@ -309,108 +309,69 @@ function Sala() {
     socketService.getSocket().emit('start-game', { roomCode });
   };
 
-  // Funções de desenho
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isDrawer || isTouchDrawing) return;
+  // Função para manipular o desenho (agora via DrawingCanvas)
+  const handleDrawPoint = (point: { x: number; y: number }) => {
+    if (!isDrawer) return;
+    
+    // Atualiza localmente
+    setLines(prev => {
+      if (!prev.length || !drawing) {
+        const novaLinha = { points: [point], color: strokeColor, width: strokeWidth };
+        console.log('NOVA LINHA LOCAL:', novaLinha);
+        return [...prev, novaLinha];
+      } else {
+        const newLines = [...prev];
+        if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
+        newLines[newLines.length - 1].points.push(point);
+        console.log('ADICIONANDO PONTO À LINHA LOCAL:', point, newLines);
+        return newLines;
+      }
+    });
+    
+    // Envia para o servidor
+    const socket = socketService.getSocket();
+    socket.emit('draw-line', { roomCode, point, color: strokeColor, width: strokeWidth });
+  };
+
+  const handleStartLine = () => {
+    if (!isDrawer) return;
     setDrawing(true);
     drawingRef.current = true;
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const xNorm = (e.clientX - rect.left) / rect.width;
-    const yNorm = (e.clientY - rect.top) / rect.height;
-    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }], color: strokeColor, width: strokeWidth }]); // Atualiza localmente
-    const socket = socketService.getSocket();
-    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm }, color: strokeColor, width: strokeWidth });
+    console.log('Iniciando nova linha de desenho');
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawer || !drawingRef.current || isTouchDrawing) return;
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const xNorm = (e.clientX - rect.left) / rect.width;
-    const yNorm = (e.clientY - rect.top) / rect.height;
-    setLines(prev => {
-      if (prev.length === 0) return prev;
-      const newLines = [...prev];
-      if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
-      newLines[newLines.length - 1].points.push({ x: xNorm, y: yNorm });
-      return newLines;
-    });
-    const socket = socketService.getSocket();
-    socket.emit('draw-line', { roomCode, point: { x: xNorm, y: yNorm }, color: strokeColor, width: strokeWidth });
-  };
-
-  const handleMouseUp = () => {
-    if (!isDrawer || isTouchDrawing) return;
+  const handleEndLine = () => {
+    if (!isDrawer) return;
     setDrawing(false);
     drawingRef.current = false;
-    const socket = socketService.getSocket();
     
-    // Enviar a linha completa ao finalizar o traço
+    // Envia a linha completa
     if (lines.length > 0) {
-      const lastLine = lines[lines.length - 1];
-      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
-      console.log('Enviada linha completa ao finalizar traço (mouse)', lastLine);
-    }
-  };
-
-  // Funções de toque para desenhar no mobile
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
-    setIsTouchDrawing(true);
-    e.preventDefault();
-    e.stopPropagation();
-    setDrawing(true);
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const touch = e.touches[0];
-    const xNorm = (touch.clientX - rect.left) / rect.width;
-    const yNorm = (touch.clientY - rect.top) / rect.height;
-    setLines(prev => [...prev, { points: [{ x: xNorm, y: yNorm }], color: strokeColor, width: strokeWidth }]);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDrawer || !drawing) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const touch = e.touches[0];
-    const xNorm = (touch.clientX - rect.left) / rect.width;
-    const yNorm = (touch.clientY - rect.top) / rect.height;
-    setLines(prev => {
-      if (prev.length === 0) return prev;
-      const newLines = [...prev];
-      if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
-      newLines[newLines.length - 1].points.push({ x: xNorm, y: yNorm });
-      return newLines;
-    });
-  };
-
-  const handleTouchEnd = () => {
-    if (!isDrawer) return;
-    setDrawing(false);
-    setIsTouchDrawing(false);
-    const socket = socketService.getSocket();
-    
-    // Enviar a linha completa ao finalizar o traço
-    if (lines.length > 0) {
-      const lastLine = lines[lines.length - 1];
-      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
-      console.log('Enviada linha completa ao finalizar traço (touch)', lastLine);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    if (!isDrawer) return;
-    setDrawing(false);
-    setIsTouchDrawing(false); // Garante que o rato volta a funcionar
-    
-    // Enviar a linha completa se o mouse sair do canvas durante o desenho
-    if (drawingRef.current && lines.length > 0) {
       const socket = socketService.getSocket();
       const lastLine = lines[lines.length - 1];
       socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
-      console.log('Enviada linha completa ao sair do canvas', lastLine);
-      drawingRef.current = false;
+      console.log('Enviada linha completa ao finalizar traço (via DrawingCanvas)', lastLine);
     }
   };
+
+  // Adicionamos um useEffect para prevenir scroll no corpo da página quando estiver desenhando
+  useEffect(() => {
+    const preventBodyScroll = (e: TouchEvent) => {
+      if (isDrawer && drawing) {
+        e.preventDefault();
+      }
+    };
+
+    const options = { passive: false };
+    
+    if (isDrawer) {
+      document.body.addEventListener('touchmove', preventBodyScroll, options);
+    }
+    
+    return () => {
+      document.body.removeEventListener('touchmove', preventBodyScroll);
+    };
+  }, [isDrawer, drawing]);
 
   // Desenhar no canvas
   useEffect(() => {
@@ -649,38 +610,9 @@ function Sala() {
                 <DrawingCanvas
                   lines={lines}
                   isDrawer={isDrawer}
-                  onDraw={(point) => {
-                    if (isDrawer) {
-                      console.log('EMITINDO DRAW-LINE PARA O BACKEND:', point);
-                      setLines(prev => {
-                        if (!prev.length || !drawing) {
-                          const novaLinha = { points: [point], color: strokeColor, width: strokeWidth };
-                          console.log('NOVA LINHA LOCAL:', novaLinha);
-                          return [...prev, novaLinha];
-                        } else {
-                          const newLines = [...prev];
-                          newLines[newLines.length - 1].points.push(point);
-                          console.log('ADICIONANDO PONTO À LINHA LOCAL:', point, newLines);
-                          return newLines;
-                        }
-                      });
-                      const socket = socketService.getSocket();
-                      socket.emit('draw-line', { roomCode, point, color: strokeColor, width: strokeWidth });
-                    }
-                  }}
-                  onStartLine={() => {
-                    setDrawing(true);
-                    console.log('Iniciando nova linha de desenho');
-                  }}
-                  onEndLine={() => {
-                    setDrawing(false);
-                    if (isDrawer && lines.length > 0) {
-                      const socket = socketService.getSocket();
-                      const lastLine = lines[lines.length - 1];
-                      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
-                      console.log('Enviada linha completa ao finalizar traço (desenhista)', lastLine);
-                    }
-                  }}
+                  onDraw={handleDrawPoint}
+                  onStartLine={handleStartLine}
+                  onEndLine={handleEndLine}
                   strokeColor={strokeColor}
                   strokeWidth={strokeWidth}
                   onColorChange={setStrokeColor}
@@ -688,7 +620,7 @@ function Sala() {
                 />
                 <button
                   onClick={handleClearCanvas}
-                  className="bg-red-500 text-white px-4 py-2 rounded mb-2 hover:bg-red-600 transition"
+                  className="bg-red-500 text-white px-4 py-2 rounded mt-4 mb-2 hover:bg-red-600 transition"
                 >
                   Apagar desenho
                 </button>
@@ -700,38 +632,9 @@ function Sala() {
                 <DrawingCanvas
                   lines={lines}
                   isDrawer={isDrawer}
-                  onDraw={(point) => {
-                    if (isDrawer) {
-                      console.log('EMITINDO DRAW-LINE PARA O BACKEND:', point);
-                      setLines(prev => {
-                        if (!prev.length || !drawing) {
-                          const novaLinha = { points: [point], color: strokeColor, width: strokeWidth };
-                          console.log('NOVA LINHA LOCAL:', novaLinha);
-                          return [...prev, novaLinha];
-                        } else {
-                          const newLines = [...prev];
-                          newLines[newLines.length - 1].points.push(point);
-                          console.log('ADICIONANDO PONTO À LINHA LOCAL:', point, newLines);
-                          return newLines;
-                        }
-                      });
-                      const socket = socketService.getSocket();
-                      socket.emit('draw-line', { roomCode, point, color: strokeColor, width: strokeWidth });
-                    }
-                  }}
-                  onStartLine={() => {
-                    setDrawing(true);
-                    console.log('Iniciando nova linha de desenho (espectador)');
-                  }}
-                  onEndLine={() => {
-                    setDrawing(false);
-                    if (isDrawer && lines.length > 0) {
-                      const socket = socketService.getSocket();
-                      const lastLine = lines[lines.length - 1];
-                      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
-                      console.log('Enviada linha completa ao finalizar traço (espectador)', lastLine);
-                    }
-                  }}
+                  onDraw={handleDrawPoint}
+                  onStartLine={handleStartLine}
+                  onEndLine={handleEndLine}
                   strokeColor={strokeColor}
                   strokeWidth={strokeWidth}
                 />
