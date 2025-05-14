@@ -140,29 +140,36 @@ function Sala() {
     const handleDrawLine = (data: any) => {
       if (isDrawer) return; // O desenhista já desenhou localmente
       console.log('RECEBIDO DRAW-LINE DO BACKEND:', data);
-      if (data.point) {
-        setLines(prev => {
-          if (
-            prev.length === 0 ||
-            !prev[prev.length - 1] ||
-            !Array.isArray(prev[prev.length - 1].points)
-          ) {
-            console.log('BUFFERIZADO PONTO (sem linha):', data.point);
-            return prev;
-          }
-          const newLines = [...prev];
-          newLines[newLines.length - 1].points.push(data.point);
-          console.log('ADICIONADO PONTO RECEBIDO À LINHA:', data.point, newLines);
-          return newLines;
-        });
-      } else if (data.line) {
+      
+      if (data.line) {
+        // Caso de uma linha completa - comportamento principal e preferido
+        console.log('RECEBIDA LINHA COMPLETA:', data.line);
         setLines(prev => {
           const newLines = [...prev, data.line];
+          // Adicionamos os pontos pendentes, se existirem
           if (pendingPointsRef.current.length > 0) {
+            console.log('Adicionando pontos pendentes à linha recebida:', pendingPointsRef.current.length);
+            if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
             newLines[newLines.length - 1].points.push(...pendingPointsRef.current);
             pendingPointsRef.current = [];
           }
           return newLines;
+        });
+      } else if (data.point) {
+        // Caso de um ponto individual
+        setLines(prev => {
+          if (prev.length === 0) {
+            // Se não temos linhas, criamos uma nova com este ponto
+            console.log('CRIANDO NOVA LINHA PARA PONTO RECEBIDO:', data.point);
+            return [...prev, { points: [data.point] }];
+          } else {
+            // Caso contrário, adicionamos o ponto à última linha
+            const newLines = [...prev];
+            if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
+            newLines[newLines.length - 1].points.push(data.point);
+            console.log('ADICIONADO PONTO RECEBIDO À LINHA:', data.point);
+            return newLines;
+          }
         });
       }
     };
@@ -330,7 +337,13 @@ function Sala() {
     setDrawing(false);
     drawingRef.current = false;
     const socket = socketService.getSocket();
-    // O estado 'lines' será atualizado apenas ao receber do servidor para espectadores
+    
+    // Enviar a linha completa ao finalizar o traço
+    if (lines.length > 0) {
+      const lastLine = lines[lines.length - 1];
+      socket.emit('draw-line', { roomCode, line: lastLine });
+      console.log('Enviada linha completa ao finalizar traço (mouse)', lastLine);
+    }
   };
 
   // Funções de toque para desenhar no mobile
@@ -369,9 +382,12 @@ function Sala() {
     setDrawing(false);
     setIsTouchDrawing(false);
     const socket = socketService.getSocket();
-    const lastLine = lines[lines.length - 1];
-    if (lastLine) {
+    
+    // Enviar a linha completa ao finalizar o traço
+    if (lines.length > 0) {
+      const lastLine = lines[lines.length - 1];
       socket.emit('draw-line', { roomCode, line: lastLine });
+      console.log('Enviada linha completa ao finalizar traço (touch)', lastLine);
     }
   };
 
@@ -379,6 +395,15 @@ function Sala() {
     if (!isDrawer) return;
     setDrawing(false);
     setIsTouchDrawing(false); // Garante que o rato volta a funcionar
+    
+    // Enviar a linha completa se o mouse sair do canvas durante o desenho
+    if (drawingRef.current && lines.length > 0) {
+      const socket = socketService.getSocket();
+      const lastLine = lines[lines.length - 1];
+      socket.emit('draw-line', { roomCode, line: lastLine });
+      console.log('Enviada linha completa ao sair do canvas', lastLine);
+      drawingRef.current = false;
+    }
   };
 
   // Desenhar no canvas
@@ -637,8 +662,19 @@ function Sala() {
                       socket.emit('draw-line', { roomCode, point });
                     }
                   }}
-                  onStartLine={() => setDrawing(true)}
-                  onEndLine={() => setDrawing(false)}
+                  onStartLine={() => {
+                    setDrawing(true);
+                    console.log('Iniciando nova linha de desenho');
+                  }}
+                  onEndLine={() => {
+                    setDrawing(false);
+                    if (isDrawer && lines.length > 0) {
+                      const socket = socketService.getSocket();
+                      const lastLine = lines[lines.length - 1];
+                      socket.emit('draw-line', { roomCode, line: lastLine });
+                      console.log('Enviada linha completa ao finalizar traço (desenhista)', lastLine);
+                    }
+                  }}
                 />
                 <button
                   onClick={handleClearCanvas}
@@ -673,8 +709,19 @@ function Sala() {
                       socket.emit('draw-line', { roomCode, point });
                     }
                   }}
-                  onStartLine={() => setDrawing(true)}
-                  onEndLine={() => setDrawing(false)}
+                  onStartLine={() => {
+                    setDrawing(true);
+                    console.log('Iniciando nova linha de desenho (espectador)');
+                  }}
+                  onEndLine={() => {
+                    setDrawing(false);
+                    if (isDrawer && lines.length > 0) {
+                      const socket = socketService.getSocket();
+                      const lastLine = lines[lines.length - 1];
+                      socket.emit('draw-line', { roomCode, line: lastLine });
+                      console.log('Enviada linha completa ao finalizar traço (espectador)', lastLine);
+                    }
+                  }}
                 />
                 <p className="text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
                 {/* Campo de palpite */}

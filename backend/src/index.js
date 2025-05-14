@@ -367,7 +367,17 @@ io.on('connection', (socket) => {
       console.log('Sala não encontrada:', roomCode);
       return;
     }
+    
     if (line) {
+      // Recebemos uma linha completa - comportamento principal e preferido
+      console.log('Recebida linha completa com ' + (line.points ? line.points.length : 0) + ' pontos');
+      
+      // Verificar se a linha tem pontos válidos
+      if (!line.points || !Array.isArray(line.points) || line.points.length === 0) {
+        console.log('Linha recebida sem pontos válidos, ignorando');
+        return;
+      }
+      
       // Se houver pontos pendentes, adiciona-os à linha
       const pending = pendingPointsByRoom.get(roomCode) || [];
       if (pending.length > 0) {
@@ -376,19 +386,27 @@ io.on('connection', (socket) => {
         pendingPointsByRoom.set(roomCode, []);
         console.log('Adicionados pontos pendentes à linha:', pending.length);
       }
+      
+      // Salvar linha e emitir para todos na sala
       room.lines.push(line);
-      io.to(roomCode).emit('draw-line', line);
+      io.to(roomCode).emit('draw-line', { line });
+      console.log('Linha enviada para todos os espectadores');
     } else if (point) {
+      // Recebemos um ponto individual
       if (room.lines.length === 0) {
-        // Guarda ponto no buffer até a linha chegar
-        let pending = pendingPointsByRoom.get(roomCode) || [];
-        pending.push(point);
-        pendingPointsByRoom.set(roomCode, pending);
-        console.log('Ponto guardado no buffer, aguardando linha inicial.');
-        return;
+        // Se não temos linhas, criamos uma nova linha com este ponto
+        room.lines.push({ points: [point] });
+        io.to(roomCode).emit('draw-line', { line: { points: [point] } });
+        console.log('Criada nova linha com ponto inicial');
+      } else {
+        // Adicionamos o ponto à última linha
+        if (!room.lines[room.lines.length - 1].points) {
+          room.lines[room.lines.length - 1].points = [];
+        }
+        room.lines[room.lines.length - 1].points.push(point);
+        io.to(roomCode).emit('draw-line', { point });
+        console.log('Ponto adicionado à linha existente e enviado');
       }
-      room.lines[room.lines.length - 1].points.push(point);
-      io.to(roomCode).emit('draw-line', { point });
     }
   });
 
