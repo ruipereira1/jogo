@@ -936,7 +936,42 @@ function Sala() {
         </div>
       )}
 
-      {/* Restante do código para overlays como está no original ... */}
+      {/* Countdown entre rodadas com efeito visual atraente */}
+      {countdown !== null && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+          <div className={`flex flex-col items-center justify-center gap-4`}>
+            <div className={`relative rounded-full flex items-center justify-center ${isLastRoundCountdown ? 'bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500' : 'bg-yellow-300'} text-blue-900 font-extrabold ${deviceType === 'mobile' ? 'w-36 h-36 text-6xl' : 'w-48 h-48 text-7xl'} ${countdown === 1 ? 'animate-bounce' : 'animate-pulse'}`}>
+              <div className="absolute inset-0 rounded-full opacity-20 animate-ping bg-white"></div>
+              <div className="absolute inset-0 rounded-full animate-spin-slow border-4 border-dashed border-white opacity-70"></div>
+              {countdown}
+            </div>
+            
+            <div className={`text-white font-bold text-center ${deviceType === 'mobile' ? 'text-xl' : 'text-2xl'} transform ${isLastRoundCountdown ? 'scale-110' : ''} transition-transform`}>
+              {isLastRoundCountdown ? (
+                <span className="animate-pulse text-yellow-300">🔥 ÚLTIMA RODADA 🔥</span>
+              ) : (
+                <span>Preparar para a rodada {round}/{maxRounds}</span>
+              )}
+            </div>
+            
+            {isLastRoundCountdown && (
+              <div className="flex gap-2 mt-2">
+                {[...Array(5)].map((_, i) => (
+                  <span key={i} className={`text-2xl animate-bounce`} style={{ animationDelay: `${i * 0.1}s` }}>🏆</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {roundEnded && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+          <div className={`bg-red-500 text-white font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse ${deviceType === 'mobile' ? 'text-2xl' : 'text-4xl'}`}>
+            {winnerName} acertou a palavra!
+          </div>
+        </div>
+      )}
     </div>
   );
 }
