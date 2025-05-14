@@ -94,7 +94,7 @@ const DrawingCanvas: React.FC<Props> = ({
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
-      // Suavização de linha - usando curvas de Bezier
+      // Suavização de linha melhorada
       if (line.points.length === 1) {
         // Se só temos um ponto, desenhamos um círculo
         const pt = line.points[0];
@@ -107,26 +107,41 @@ const DrawingCanvas: React.FC<Props> = ({
         ctx.moveTo(line.points[0].x * canvas.width, line.points[0].y * canvas.height);
         ctx.lineTo(line.points[1].x * canvas.width, line.points[1].y * canvas.height);
       } else {
-        // Para 3 ou mais pontos, usamos curvas para suavizar
+        // Para 3 ou mais pontos, usamos curvas de Catmull-Rom para suavização natural
         ctx.moveTo(line.points[0].x * canvas.width, line.points[0].y * canvas.height);
         
-        for (let i = 1; i < line.points.length - 1; i++) {
-          const xc = (line.points[i].x + line.points[i + 1].x) / 2 * canvas.width;
-          const yc = (line.points[i].y + line.points[i + 1].y) / 2 * canvas.height;
-          
-          ctx.quadraticCurveTo(
-            line.points[i].x * canvas.width, 
-            line.points[i].y * canvas.height, 
-            xc, yc
-          );
-        }
+        // Implementação simplificada de Catmull-Rom splines para suavização natural
+        const tension = 0.5; // Controla a "tensão" da curva - valores entre 0.3 e 0.6 são bons
         
-        // Último ponto
-        const lastIdx = line.points.length - 1;
-        ctx.lineTo(
-          line.points[lastIdx].x * canvas.width, 
-          line.points[lastIdx].y * canvas.height
-        );
+        for (let i = 0; i < line.points.length - 1; i++) {
+          const p0 = line.points[Math.max(i - 1, 0)];
+          const p1 = line.points[i];
+          const p2 = line.points[i + 1];
+          const p3 = line.points[Math.min(i + 2, line.points.length - 1)];
+          
+          // Criar pontos de controle para spline mais natural
+          for (let t = 0; t <= 1; t += 0.1) {
+            const t2 = t * t;
+            const t3 = t2 * t;
+            
+            // Catmull-Rom spline
+            const x = 0.5 * (
+              (2 * p1.x) +
+              (-p0.x + p2.x) * t +
+              (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+              (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
+            );
+            
+            const y = 0.5 * (
+              (2 * p1.y) +
+              (-p0.y + p2.y) * t +
+              (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+              (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
+            );
+            
+            ctx.lineTo(x * canvas.width, y * canvas.height);
+          }
+        }
       }
       
       ctx.stroke();
@@ -166,11 +181,12 @@ const DrawingCanvas: React.FC<Props> = ({
     const x = (touch.clientX - rect.left) / rect.width;
     const y = (touch.clientY - rect.top) / rect.height;
     
-    // Se a distância é muito pequena, ignoramos para evitar pontos excedentes
+    // Reduzir o threshold para capturar movimentos menores
     if (lastPoint.current) {
       const dx = Math.abs(x - lastPoint.current.x);
       const dy = Math.abs(y - lastPoint.current.y);
-      if (dx < 0.003 && dy < 0.003) return;
+      // Threshold reduzido para mais sensibilidade
+      if (dx < 0.001 && dy < 0.001) return;
     }
     
     lastPoint.current = { x, y };
@@ -217,11 +233,12 @@ const DrawingCanvas: React.FC<Props> = ({
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     
-    // Se a distância é muito pequena, ignoramos para evitar pontos excedentes
+    // Reduzir o threshold para capturar movimentos menores
     if (lastPoint.current) {
       const dx = Math.abs(x - lastPoint.current.x);
       const dy = Math.abs(y - lastPoint.current.y);
-      if (dx < 0.003 && dy < 0.003) return;
+      // Threshold reduzido para mais sensibilidade
+      if (dx < 0.001 && dy < 0.001) return;
     }
     
     lastPoint.current = { x, y };

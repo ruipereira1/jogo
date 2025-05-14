@@ -57,6 +57,9 @@ function Sala() {
   const pendingPointsRef = useRef<any[]>([]);
   const [strokeColor, setStrokeColor] = useState('#000000');
   const [strokeWidth, setStrokeWidth] = useState(3);
+  // Ref para debouncing do envio de pontos
+  const lastSentRef = useRef<number>(0);
+  const pointQueueRef = useRef<{x: number, y: number}[]>([]);
 
   // Ref para garantir valor atualizado de drawing
   const drawingRef = useRef(false);
@@ -193,6 +196,33 @@ function Sala() {
             // Caso contrário, adicionamos o ponto à última linha
             const newLines = [...prev];
             if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
+            
+            // Verificar se precisamos interpolar pontos intermediários
+            const lastLineIndex = newLines.length - 1;
+            const lastPoints = newLines[lastLineIndex].points;
+            
+            if (lastPoints.length > 0) {
+              const lastPoint = lastPoints[lastPoints.length - 1];
+              const newPoint = data.point;
+              
+              // Se a distância é significativa, adicionar pontos intermediários para melhor fluidez
+              const dx = newPoint.x - lastPoint.x;
+              const dy = newPoint.y - lastPoint.y;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              
+              if (distance > 0.03) { // Se os pontos estão distantes, interpolar
+                const steps = Math.ceil(distance / 0.01); // Determinar número de passos
+                for (let i = 1; i < steps; i++) {
+                  const ratio = i / steps;
+                  const interpolatedPoint = {
+                    x: lastPoint.x + dx * ratio,
+                    y: lastPoint.y + dy * ratio
+                  };
+                  newLines[lastLineIndex].points.push(interpolatedPoint);
+                }
+              }
+            }
+            
             newLines[newLines.length - 1].points.push(data.point);
             console.log('ADICIONADO PONTO RECEBIDO À LINHA:', data.point);
             return newLines;
@@ -348,15 +378,53 @@ function Sala() {
       } else {
         const newLines = [...prev];
         if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
-        newLines[newLines.length - 1].points.push(point);
+        
+        // Aplicar interpolação para pontos intermediários se o movimento for muito rápido
+        const lastLineIndex = newLines.length - 1;
+        const lastPoints = newLines[lastLineIndex].points;
+        const lastPoint = lastPoints[lastPoints.length - 1];
+        
+        // Se a distância é significativa, adicionar pontos intermediários para melhor fluidez
+        const dx = point.x - lastPoint.x;
+        const dy = point.y - lastPoint.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > 0.03) { // Se o movimento foi rápido (distância grande)
+          const steps = Math.ceil(distance / 0.01); // Determinar número de passos
+          for (let i = 1; i < steps; i++) {
+            const ratio = i / steps;
+            const interpolatedPoint = {
+              x: lastPoint.x + dx * ratio,
+              y: lastPoint.y + dy * ratio
+            };
+            newLines[lastLineIndex].points.push(interpolatedPoint);
+          }
+        }
+        
+        // Adicionar o ponto real
+        newLines[lastLineIndex].points.push(point);
+        
         console.log('ADICIONANDO PONTO À LINHA LOCAL:', point, newLines);
         return newLines;
       }
     });
     
-    // Envia para o servidor
-    const socket = socketService.getSocket();
-    socket.emit('draw-line', { roomCode, point, color: strokeColor, width: strokeWidth });
+    // Adicionar à fila de pontos para envio limitado
+    pointQueueRef.current.push(point);
+    
+    // Limitar a frequência de envio ao servidor (debounce)
+    const now = Date.now();
+    if (now - lastSentRef.current > 30) { // Limite de 30ms (~33fps)
+      // Enviar pontos acumulados
+      if (pointQueueRef.current.length > 0) {
+        const socket = socketService.getSocket();
+        // Envia apenas o ponto mais recente para reduzir tráfego
+        const latestPoint = pointQueueRef.current[pointQueueRef.current.length - 1];
+        socket.emit('draw-line', { roomCode, point: latestPoint, color: strokeColor, width: strokeWidth });
+        pointQueueRef.current = []; // Limpa a fila
+        lastSentRef.current = now;
+      }
+    }
   };
 
   const handleStartLine = () => {
@@ -370,6 +438,14 @@ function Sala() {
     if (!isDrawer) return;
     setDrawing(false);
     drawingRef.current = false;
+    
+    // Certifica-se de que todos os pontos restantes da fila sejam processados
+    if (pointQueueRef.current.length > 0) {
+      const socket = socketService.getSocket();
+      const latestPoint = pointQueueRef.current[pointQueueRef.current.length - 1];
+      socket.emit('draw-line', { roomCode, point: latestPoint, color: strokeColor, width: strokeWidth });
+      pointQueueRef.current = []; // Limpa a fila
+    }
     
     // Envia a linha completa
     if (lines.length > 0) {
