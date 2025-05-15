@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 
 interface Point { 
   x: number; 
@@ -6,6 +6,8 @@ interface Point {
   pressure?: number;
   color?: string;
   size?: number;
+  isStartOfLine?: boolean;
+  clientId?: string;
 }
 
 interface Props {
@@ -44,11 +46,10 @@ const DrawingCanvas: React.FC<Props> = ({
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef<Point | null>(null);
-  const pointsRef = useRef<Point[]>([]);
+  const pointsBufferRef = useRef<Point[]>([]);
   const [showTools, setShowTools] = useState(false);
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   const [touchActive, setTouchActive] = useState(false);
-  const processedPointsRef = useRef<Set<string>>(new Set());
   const [toolPosition, setToolPosition] = useState<ToolbarPosition>('top');
   const [isMinimized, setIsMinimized] = useState(false);
   const lastClientPointsRef = useRef<{[key: string]: Point[]}>({});
@@ -58,9 +59,18 @@ const DrawingCanvas: React.FC<Props> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Configurar o contexto do canvas
+    // Configuração para canvas de alta resolução
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
+    
+    // Escalar o contexto para dispositivos de alta densidade
+    ctx.scale(dpr, dpr);
     
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -71,6 +81,29 @@ const DrawingCanvas: React.FC<Props> = ({
     // Limpar o canvas inicialmente
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Ajustar tamanho do canvas ao redimensionar
+    const handleResize = () => {
+      const newRect = canvas.getBoundingClientRect();
+      canvas.width = newRect.width * dpr;
+      canvas.height = newRect.height * dpr;
+      
+      ctx.scale(dpr, dpr);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = strokeWidth;
+      
+      // Restaurar conteúdo
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
   // Atualizar o estilo de linha quando as props mudam
@@ -91,7 +124,7 @@ const DrawingCanvas: React.FC<Props> = ({
       
       // Definir posição padrão com base no dispositivo
       if (isMobile) {
-        setToolPosition('bottom');
+        setToolPosition('floating');
       } else {
         setToolPosition('top');
       }
@@ -103,78 +136,28 @@ const DrawingCanvas: React.FC<Props> = ({
     return () => window.removeEventListener('resize', detectMobile);
   }, []);
 
-  // Função de suavização de curva
-  const smoothLine = (points: Point[]): Point[] => {
-    if (points.length < 3) return points;
-    
-    const smoothed: Point[] = [];
-    
-    // Manter o primeiro ponto
-    smoothed.push(points[0]);
-    
-    // Calcular pontos de controle para cada segmento
-    for (let i = 1; i < points.length - 1; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
-      const next = points[i + 1];
-      
-      // Ponto médio entre pontos adjacentes
-      const midPoint: Point = {
-        x: (curr.x + next.x) / 2,
-        y: (curr.y + next.y) / 2,
-        pressure: curr.pressure
-      };
-      
-      smoothed.push(curr);
-      smoothed.push(midPoint);
-    }
-    
-    // Manter o último ponto
-    smoothed.push(points[points.length - 1]);
-    
-    return smoothed;
-  };
-
-  // Desenhar uma curva suave baseada em pontos
-  const drawSmoothLine = (ctx: CanvasRenderingContext2D, points: Point[], color: string, width: number) => {
-    if (points.length < 2) return;
+  // Função simplificada para desenhar linha 
+  const drawLine = useCallback((ctx: CanvasRenderingContext2D, startPoint: Point, endPoint: Point, color: string, width: number) => {
+    if (!ctx) return;
     
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.beginPath();
     
-    // Mover para o primeiro ponto
-    ctx.moveTo(points[0].x * ctx.canvas.width, points[0].y * ctx.canvas.height);
+    const canvas = ctx.canvas;
+    const rect = canvas.getBoundingClientRect();
     
-    // Para cada par de pontos, desenhar uma curva quadrática
-    for (let i = 1; i < points.length - 1; i += 2) {
-      const controlPoint = points[i];
-      const endPoint = points[i + 1];
-      
-      ctx.quadraticCurveTo(
-        controlPoint.x * ctx.canvas.width, 
-        controlPoint.y * ctx.canvas.height,
-        endPoint.x * ctx.canvas.width, 
-        endPoint.y * ctx.canvas.height
-      );
-    }
-    
-    // Se houver um número ímpar de pontos, desenhar até o último
-    if (points.length % 2 === 0) {
-      const lastPoint = points[points.length - 1];
-      ctx.lineTo(lastPoint.x * ctx.canvas.width, lastPoint.y * ctx.canvas.height);
-    }
-    
+    // Usar coordenadas absolutas
+    ctx.moveTo(startPoint.x * rect.width, startPoint.y * rect.height);
+    ctx.lineTo(endPoint.x * rect.width, endPoint.y * rect.height);
     ctx.stroke();
     ctx.restore();
-  };
+  }, []);
 
-  // Efeito para processar pontos recebidos quando não é o desenhista
+  // Processar pontos recebidos quando não é o desenhista
   useEffect(() => {
     if (isDrawer || !receivedPoints || receivedPoints.length === 0) return;
-    
-    console.log(`DrawingCanvas: Processando ${receivedPoints.length} pontos recebidos (espectador)`, receivedPoints);
     
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -182,7 +165,7 @@ const DrawingCanvas: React.FC<Props> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Limpar o canvas uma vez ao receber novos pontos
+    // Limpar o canvas uma vez se algum ponto indica início de linha
     if (receivedPoints.some(p => p.isStartOfLine)) {
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -202,15 +185,19 @@ const DrawingCanvas: React.FC<Props> = ({
       
       // Se for começo de nova linha, processar a linha atual e começar nova
       if (p.isStartOfLine && pointsByClient[clientId].length > 0) {
-        // Processar linha atual
-        const smoothedPoints = smoothLine(pointsByClient[clientId]);
-        drawSmoothLine(ctx, smoothedPoints, p.color || '#222', p.size || 3);
+        // Processar linha anterior
+        const points = pointsByClient[clientId];
+        
+        // Desenhar linha entre cada par de pontos
+        for (let i = 0; i < points.length - 1; i++) {
+          drawLine(ctx, points[i], points[i+1], p.color || '#222', p.size || 3);
+        }
         
         // Limpar pontos deste cliente
         pointsByClient[clientId] = [];
       }
       
-      // Adicionar ponto com todas as propriedades necessárias
+      // Adicionar ponto
       pointsByClient[clientId].push({
         x: p.x,
         y: p.y,
@@ -222,53 +209,42 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Desenhar linhas restantes para cada cliente
     Object.entries(pointsByClient).forEach(([clientId, points]) => {
+      if (points.length > 1) {
+        const color = points[0].color || '#222';
+        const size = points[0].size || 3;
+        
+        for (let i = 0; i < points.length - 1; i++) {
+          drawLine(ctx, points[i], points[i+1], color, size);
+        }
+      }
+      
+      // Salvar último ponto para próxima atualização
       if (points.length > 0) {
-        // Obter cor e tamanho do último ponto (mais recente)
-        const lastPoint = points[points.length - 1];
-        const color = lastPoint.color || '#222';
-        const size = lastPoint.size || 3;
-        
-        const smoothedPoints = smoothLine(points);
-        drawSmoothLine(ctx, smoothedPoints, color, size);
-        
-        // Salvar pontos para a próxima atualização
         lastClientPointsRef.current[clientId] = points;
       }
     });
-    
-    // Logging detalhado para debug
-    console.log('DrawingCanvas: Processamento de pontos concluído', 
-      Object.entries(pointsByClient).map(([key, pts]) => [key, pts.length]));
-  }, [receivedPoints, isDrawer]);
+  }, [receivedPoints, isDrawer, drawLine]);
    
   // Limpar o canvas
-  const clearCanvas = () => {
-    console.log('DrawingCanvas: Executando clearCanvas');
+  const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) {
-      console.log('Canvas não encontrado ao tentar limpar');
-      return;
-    }
+    if (!canvas) return;
     
     const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      console.log('Contexto 2d não encontrado ao tentar limpar');
-      return;
-    }
+    if (!ctx) return;
     
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     lastPointRef.current = null;
-    pointsRef.current = [];
+    pointsBufferRef.current = [];
     lastClientPointsRef.current = {};
     
     // Notificar a sala sobre a limpeza
-    console.log('DrawingCanvas chamando onClear');
     onClear?.();
-  };
+  }, [onClear]);
 
-  // Event handler unificado para pointer events
-  const handlePointerDown = (e: React.PointerEvent) => {
+  // Event handler para iniciar desenho
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!isDrawer) return;
     
     // Ignorar eventos na toolbox
@@ -289,22 +265,24 @@ const DrawingCanvas: React.FC<Props> = ({
     setTouchActive(true);
     
     // Obter coordenadas normalizadas (0-1)
-    const rect = canvasRef.current!.getBoundingClientRect();
+    const rect = canvas!.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     
     // Iniciar nova linha
-    lastPointRef.current = { x, y, pressure: e.pressure || 0.5 };
-    pointsRef.current = [{ x, y, pressure: e.pressure || 0.5 }];
+    const newPoint = { x, y, pressure: e.pressure || 0.5 };
+    lastPointRef.current = newPoint;
+    pointsBufferRef.current = [newPoint];
     
     // Notificar início de linha
     onStartLine?.();
     
     // Notificar ponto
-    onDraw?.({ x, y, pressure: e.pressure });
-  };
+    onDraw?.(newPoint);
+  }, [isDrawer, onStartLine, onDraw]);
 
-  const handlePointerMove = (e: React.PointerEvent) => {
+  // Event handler para desenhar durante movimento do ponteiro
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDrawer || !isDrawingRef.current) return;
     
     // Ignorar eventos na toolbox
@@ -326,42 +304,23 @@ const DrawingCanvas: React.FC<Props> = ({
     const y = (e.clientY - rect.top) / rect.height;
     
     const newPoint = { x, y, pressure: e.pressure || 0.5 };
+    const lastPoint = lastPointRef.current;
     
-    // Adicionar ponto ao array
-    pointsRef.current.push(newPoint);
-    
-    // Se temos pontos suficientes, desenhar uma curva suave
-    if (pointsRef.current.length >= 3) {
-      // Obter os últimos pontos para desenhar
-      const pointsToSmooth = pointsRef.current.slice(-3);
-      const smoothedPoints = smoothLine(pointsToSmooth);
-      
-      // Desenhar localmente
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = strokeWidth;
-      drawSmoothLine(ctx, smoothedPoints, strokeColor, strokeWidth);
+    if (lastPoint) {
+      // Desenhar linha do último ponto até o atual
+      drawLine(ctx, lastPoint, newPoint, strokeColor, strokeWidth);
       
       // Notificar servidor sobre o novo ponto
       onDraw?.(newPoint);
-    } else {
-      // Se temos poucos pontos, desenhar linha reta
-      const lastPoint = lastPointRef.current;
-      if (lastPoint) {
-        ctx.beginPath();
-        ctx.moveTo(lastPoint.x * canvas.width, lastPoint.y * canvas.height);
-        ctx.lineTo(x * canvas.width, y * canvas.height);
-        ctx.stroke();
-        
-        // Notificar servidor sobre o novo ponto
-        onDraw?.(newPoint);
-      }
     }
     
     // Atualizar último ponto
     lastPointRef.current = newPoint;
-  };
+    pointsBufferRef.current.push(newPoint);
+  }, [isDrawer, strokeColor, strokeWidth, onDraw, drawLine]);
 
-  const handlePointerUp = (e: React.PointerEvent) => {
+  // Event handler para finalizar desenho
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
     if (!isDrawer) return;
     
     // Ignorar eventos na toolbox
@@ -384,11 +343,11 @@ const DrawingCanvas: React.FC<Props> = ({
     onEndLine?.();
     
     // Resetar pontos
-    pointsRef.current = [];
+    pointsBufferRef.current = [];
     lastPointRef.current = null;
-  };
+  }, [isDrawer, onEndLine]);
 
-  // Fechar ferramentas quando clicar fora delas
+  // Fechar ferramentas quando clicar fora
   useEffect(() => {
     const handleClickOutside = (e: Event) => {
       if (
@@ -413,18 +372,18 @@ const DrawingCanvas: React.FC<Props> = ({
 
   // Prevenir scroll quando estiver desenhando em dispositivo móvel
   useEffect(() => {
+    if (!isDrawer) return;
+    
     const preventScroll = (e: Event) => {
-      if (isDrawingRef.current && isDrawer) {
+      if (isDrawingRef.current) {
         e.preventDefault();
       }
     };
 
     const options = { passive: false };
     
-    if (isDrawer) {
-      document.addEventListener('touchmove', preventScroll, options);
-      document.addEventListener('touchstart', preventScroll, options);
-    }
+    document.addEventListener('touchmove', preventScroll, options);
+    document.addEventListener('touchstart', preventScroll, options);
     
     return () => {
       document.removeEventListener('touchmove', preventScroll);
@@ -432,33 +391,30 @@ const DrawingCanvas: React.FC<Props> = ({
     };
   }, [isDrawer]);
 
-  const toggleTools = (e: React.MouseEvent) => {
-    // Evitar que o clique no canvas ao mostrar ferramentas inicie um desenho
+  const toggleTools = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    
     if (isDrawer) {
       setShowTools(!showTools);
     }
-  };
+  }, [isDrawer, showTools]);
 
-  const handleColorSelect = (color: string) => {
-    onColorChange && onColorChange(color);
-  };
+  const handleColorSelect = useCallback((color: string) => {
+    onColorChange?.(color);
+  }, [onColorChange]);
 
-  const handleWidthSelect = (width: number) => {
-    onWidthChange && onWidthChange(width);
-  };
+  const handleWidthSelect = useCallback((width: number) => {
+    onWidthChange?.(width);
+  }, [onWidthChange]);
 
-  const cycleToolPosition = () => {
-    // Ciclo entre as posições possíveis
+  const cycleToolPosition = useCallback(() => {
     const positions: ToolbarPosition[] = ['top', 'right', 'bottom', 'left', 'floating'];
     const currentIndex = positions.indexOf(toolPosition);
     const nextIndex = (currentIndex + 1) % positions.length;
     setToolPosition(positions[nextIndex]);
-  };
+  }, [toolPosition]);
 
   // Renderizar a barra de ferramentas
-  const renderToolbar = () => {
+  const renderToolbar = useCallback(() => {
     const isHorizontal = toolPosition === 'top' || toolPosition === 'bottom';
     
     return (
@@ -468,25 +424,25 @@ const DrawingCanvas: React.FC<Props> = ({
           ${isMinimized ? 'opacity-60 hover:opacity-100' : 'opacity-100'}
           transition-all duration-200
           ${isHorizontal ? 'flex flex-wrap justify-center items-center gap-2' : 'flex flex-col items-center gap-2'}
-          ${toolPosition === 'floating' ? 'absolute right-2 top-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow' : ''}
-          ${toolPosition === 'top' ? 'w-full mb-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow' : ''}
-          ${toolPosition === 'bottom' ? 'w-full mt-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow' : ''}
-          ${toolPosition === 'left' ? 'absolute left-0 top-0 bottom-0 bg-white/90 backdrop-blur-sm p-2 rounded shadow' : ''}
-          ${toolPosition === 'right' ? 'absolute right-0 top-0 bottom-0 bg-white/90 backdrop-blur-sm p-2 rounded shadow' : ''}
+          ${toolPosition === 'floating' ? 'absolute right-2 top-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow-lg z-10' : ''}
+          ${toolPosition === 'top' ? 'w-full mb-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow-lg' : ''}
+          ${toolPosition === 'bottom' ? 'w-full mt-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow-lg' : ''}
+          ${toolPosition === 'left' ? 'mr-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow-lg' : ''}
+          ${toolPosition === 'right' ? 'ml-2 bg-white/90 backdrop-blur-sm p-2 rounded shadow-lg' : ''}
         `}
-        onClick={(e) => e.stopPropagation()} // Evitar que cliques na caixa de ferramentas passem para o canvas
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Controles da barra de ferramentas */}
         <div className={`flex ${isHorizontal ? 'items-center' : 'flex-col'} gap-1 mb-1`}>
           <button
-            className="bg-gray-200 text-gray-700 p-1 rounded text-xs"
+            className="bg-gray-200 text-gray-700 p-1 rounded text-xs hover:bg-gray-300"
             onClick={() => setIsMinimized(!isMinimized)}
             title={isMinimized ? "Expandir" : "Minimizar"}
           >
             {isMinimized ? "+" : "-"}
           </button>
           <button
-            className="bg-gray-200 text-gray-700 p-1 rounded text-xs"
+            className="bg-gray-200 text-gray-700 p-1 rounded text-xs hover:bg-gray-300"
             onClick={cycleToolPosition}
             title="Mudar posição"
           >
@@ -501,7 +457,7 @@ const DrawingCanvas: React.FC<Props> = ({
               {COLORS.map(color => (
                 <button
                   key={color}
-                  className={`w-6 h-6 rounded-full ${color === strokeColor ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}
+                  className={`w-6 h-6 rounded-full ${color === strokeColor ? 'ring-2 ring-offset-1 ring-blue-500' : ''} hover:scale-110 transition-transform`}
                   style={{ backgroundColor: color }}
                   onClick={() => handleColorSelect(color)}
                   title={`Cor ${color}`}
@@ -514,7 +470,7 @@ const DrawingCanvas: React.FC<Props> = ({
               {WIDTHS.map(width => (
                 <button
                   key={width}
-                  className={`w-6 h-6 rounded flex items-center justify-center bg-gray-100 ${width === strokeWidth ? 'ring-2 ring-blue-500' : ''}`}
+                  className={`w-6 h-6 rounded flex items-center justify-center bg-gray-100 ${width === strokeWidth ? 'ring-2 ring-blue-500' : ''} hover:bg-gray-200 transition-colors`}
                   onClick={() => handleWidthSelect(width)}
                   title={`Traço ${width}px`}
                 >
@@ -532,7 +488,7 @@ const DrawingCanvas: React.FC<Props> = ({
             
             {/* Botão de limpar */}
             <button
-              className="bg-red-500 text-white px-2 py-1 rounded text-xs mt-1"
+              className="bg-red-500 text-white px-2 py-1 rounded text-xs mt-1 hover:bg-red-600 transition-colors"
               onClick={clearCanvas}
             >
               Limpar
@@ -541,7 +497,7 @@ const DrawingCanvas: React.FC<Props> = ({
         )}
       </div>
     );
-  };
+  }, [toolPosition, isMinimized, strokeColor, strokeWidth, handleColorSelect, handleWidthSelect, clearCanvas, cycleToolPosition]);
 
   return (
     <div className="relative" ref={containerRef}>
@@ -550,7 +506,7 @@ const DrawingCanvas: React.FC<Props> = ({
       )}
       
       {isDrawer && isMobileDevice && (
-        <div className="absolute top-2 left-2 right-2 bg-yellow-100 text-blue-900 px-2 py-1 rounded text-xs text-center">
+        <div className="absolute top-2 left-2 right-2 bg-yellow-100 text-blue-900 px-2 py-1 rounded text-xs text-center z-20">
           Modo touch ativo - desenhe sem preocupação com scroll
         </div>
       )}
@@ -572,11 +528,12 @@ const DrawingCanvas: React.FC<Props> = ({
               style={{ 
                 width: '100%', 
                 maxWidth: 500, 
+                height: 'auto',
                 background: 'white', 
                 borderRadius: 8, 
                 border: '2px solid #FFD600',
                 cursor: isDrawer ? 'crosshair' : 'default',
-                touchAction: isDrawer ? 'none' : 'auto' // Prevenir scroll em touch devices
+                touchAction: isDrawer ? 'none' : 'auto'
               }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
@@ -599,7 +556,7 @@ const DrawingCanvas: React.FC<Props> = ({
       {isDrawer && (
         <div className="flex justify-center mt-2">
           <button 
-            className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded"
+            className="text-xs bg-gray-100 text-gray-700 px-3 py-1 rounded hover:bg-gray-200 transition-colors"
             onClick={toggleTools}
           >
             {showTools ? "Esconder ferramentas" : "Mostrar ferramentas"}
