@@ -246,7 +246,8 @@ function Sala() {
         setWinnerName(name);
         
         // Se estamos na última rodada e alguém acertou, terminar o jogo após mostrar o vencedor
-        if (round === maxRounds) {
+        console.log(`Acerto na rodada ${round} de ${maxRounds}`);
+        if (round >= maxRounds) {
           console.log('Última rodada com acerto! Preparando para encerrar o jogo...');
           
           // Aguardar alguns segundos para mostrar quem acertou antes de exibir o pódio

@@ -132,10 +132,14 @@ function startRound(room, io) {
 
 // Função para avançar ronda ou terminar
 function nextRoundOrEnd(room, io) {
+  console.log(`Avaliando próxima rodada: atual=${room.round}, máxima=${room.maxRounds}`);
+  
   if (room.round < room.maxRounds) {
     room.round++;
+    console.log(`Avançando para rodada ${room.round}/${room.maxRounds}`);
     setTimeout(() => startRound(room, io), 2000); // Espera 2s antes de nova ronda
   } else {
+    console.log(`Jogo finalizado após ${room.round}/${room.maxRounds} rodadas`);
     room.status = 'finished';
     io.to(room.id).emit('game-ended', {
       players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
