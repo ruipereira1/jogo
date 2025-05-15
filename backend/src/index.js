@@ -237,66 +237,90 @@ io.on('connection', (socket) => {
       
       // Registrar atividade na sala
       room.lastActivity = Date.now();
+      
+      console.log(`Tentativa de entrada na sala ${roomCode} - Nome: ${userName}, PlayerId: ${playerId || 'não fornecido'}`);
 
-      // Verificar se já existe jogador com este playerId
+      // ETAPA 1: Tentar encontrar jogador existente por playerId (mais confiável)
       let existingPlayer = null;
       if (playerId) {
         existingPlayer = room.players.find(p => p.playerId === playerId);
+        if (existingPlayer) {
+          console.log(`Jogador encontrado pelo playerId: ${existingPlayer.name}`);
+        }
       }
       
-      // Verificar se há um jogador offline com o mesmo nome (para evitar duplicados)
-      const offlinePlayerWithSameName = !existingPlayer ? 
-        room.players.find(p => p.name === userName && p.online === false) : null;
-      
-      if (offlinePlayerWithSameName) {
-        console.log(`Jogador com nome ${userName} estava offline e está reconectando`);
-        // Usar o jogador offline existente em vez de criar um novo
-        existingPlayer = offlinePlayerWithSameName;
-        // Atualizar o playerId para manter consistência
-        existingPlayer.playerId = playerId || socket.id;
+      // ETAPA 2: Se não encontrou por playerId, tentar por nome exato e qualquer status
+      if (!existingPlayer) {
+        // Verificar se há jogador com o mesmo nome exato (online ou offline)
+        const playerWithSameName = room.players.find(p => p.name === userName);
+        if (playerWithSameName) {
+          existingPlayer = playerWithSameName;
+          console.log(`Jogador encontrado pelo nome exato: ${playerWithSameName.name}`);
+        }
       }
-
+      
       // Se o jogo já começou, só permitir reentrada de quem já estava na sala
       if (room.status !== 'waiting' && !existingPlayer) {
         return callback({ success: false, error: 'Jogo já iniciado' });
       }
 
+      // CASO 1: Jogador está retornando à sala
       if (existingPlayer) {
-        // Jogador está a reentrar: atualizar socket.id, nome e marcar como online
+        console.log(`${userName} reconectando à sala ${roomCode}`);
+        
+        // Atualizar dados essenciais
         existingPlayer.id = socket.id;
-        existingPlayer.name = userName;
         existingPlayer.online = true;
+        
+        // Manter o mesmo playerId para consistência
+        // Se não tinha playerId antes, atribuir o atual
+        if (!existingPlayer.playerId) {
+          existingPlayer.playerId = playerId || socket.id;
+        }
+        
         // Cancelar timeout de remoção se existir
         if (existingPlayer._removeTimeout) {
           clearTimeout(existingPlayer._removeTimeout);
           delete existingPlayer._removeTimeout;
         }
-      } else {
-        // Verificar se já existe um jogador online com o mesmo nome
-        const duplicateName = room.players.some(p => p.name === userName && p.online !== false);
-        if (duplicateName) {
-          // Adicionar sufixo numérico para evitar duplicidade
-          let suffix = 1;
-          let newName = `${userName} (${suffix})`;
-          while (room.players.some(p => p.name === newName)) {
-            suffix++;
-            newName = `${userName} (${suffix})`;
-          }
-          userName = newName;
-          console.log(`Nome duplicado. Alterado para: ${userName}`);
+      } 
+      // CASO 2: Novo jogador entrando na sala
+      else {
+        console.log(`Novo jogador ${userName} entrando na sala ${roomCode}`);
+        
+        // Verificar duplicação de nome com jogadores ONLINE
+        const onlinePlayerWithSimilarName = room.players.find(p => 
+          p.name.replace(/\s*\(\d+\)$/, '') === userName && 
+          p.online !== false
+        );
+        
+        let finalUserName = userName;
+        
+        if (onlinePlayerWithSimilarName) {
+          // Nome base já existe com um jogador online, precisamos adicionar sufixo
+          // Procurar o maior sufixo já existente para este nome
+          const baseNamePattern = new RegExp(`^${userName}\\s*\\((\\d+)\\)$`);
+          let highestSuffix = 0;
+          
+          room.players.forEach(p => {
+            const match = p.name.match(baseNamePattern);
+            if (match && parseInt(match[1]) > highestSuffix) {
+              highestSuffix = parseInt(match[1]);
+            }
+          });
+          
+          // Incrementar o maior sufixo encontrado
+          finalUserName = `${userName} (${highestSuffix + 1})`;
+          console.log(`Nome duplicado, alterado para: ${finalUserName}`);
         }
         
-        // Impedir duplicidade de playerId
-        if (playerId && room.players.some(p => p.playerId === playerId)) {
-          return callback({ success: false, error: 'Já existe um jogador com este ID na sala.' });
-        }
         // Adicionar novo jogador
         room.players.push({
           id: socket.id,
           playerId: playerId || socket.id,
-          name: userName,
+          name: finalUserName,
           score: 0,
-          isHost: false,
+          isHost: room.players.length === 0, // Primeiro jogador é host
           online: true
         });
       }
@@ -304,16 +328,36 @@ io.on('connection', (socket) => {
       // Associar o socket à sala
       socket.join(roomCode);
       socket.data.roomCode = roomCode;
-      socket.data.userName = userName;
-      socket.data.playerId = playerId || socket.id;
+      socket.data.userName = existingPlayer ? existingPlayer.name : userName;
+      socket.data.playerId = existingPlayer ? existingPlayer.playerId : (playerId || socket.id);
 
-      console.log(`${userName} entrou/reentrou na sala ${roomCode}`);
-      
-      // Notificar todos na sala sobre o novo jogador
-      console.log('player-joined emitido para sala', roomCode, room.players.map(p => p.name));
+      // Limpar jogadores desconectados com mesmo nome base
+      const currentPlayer = room.players.find(p => p.id === socket.id);
+      if (currentPlayer) {
+        const baseNameCurrent = currentPlayer.name.replace(/\s*\(\d+\)$/, '');
+        
+        // Identificar jogadores offline com o mesmo nome base que podem ser removidos
+        const staleOfflinePlayers = room.players.filter(p => 
+          p.id !== socket.id && 
+          p.online === false && 
+          p.name.replace(/\s*\(\d+\)$/, '') === baseNameCurrent
+        );
+        
+        if (staleOfflinePlayers.length > 0) {
+          console.log(`Removendo ${staleOfflinePlayers.length} jogadores offline com nome base "${baseNameCurrent}"`);
+          room.players = room.players.filter(p => 
+            !(p.id !== socket.id && 
+              p.online === false && 
+              p.name.replace(/\s*\(\d+\)$/, '') === baseNameCurrent)
+          );
+        }
+      }
+
+      // Notificar todos na sala sobre o novo jogador/reconexão
+      console.log(`Emitindo atualização para sala ${roomCode}, ${room.players.length} jogadores`);
       io.to(roomCode).emit('player-joined', {
         playerId: socket.data.playerId,
-        playerName: userName,
+        playerName: socket.data.userName,
         players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
           id, playerId, name, score, isHost, online
         }))
@@ -332,6 +376,7 @@ io.on('connection', (socket) => {
         status: room.status,
         word: room.currentWord,
         lines: room.lines,
+        points: room.points || [],
         timer: room._lastTimeLeft || 0,
         podium: room.status === 'finished' ? [...room.players].sort((a, b) => b.score - a.score) : null
       });
