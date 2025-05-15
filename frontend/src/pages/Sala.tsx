@@ -729,7 +729,7 @@ function Sala() {
     return (
       <div className={`bg-white/10 backdrop-blur-sm rounded-lg p-4 ${deviceType === 'mobile' ? 'mb-3' : 'mb-6'}`}>
         <div className="flex justify-between items-center mb-2">
-          <h2 className="font-semibold">Jogadores ({players.length})</h2>
+          <h2 className="font-semibold">Jogadores ({players.filter(p => p.online !== false).length}/{players.length})</h2>
           <div className="flex items-center gap-1">
             <span className="text-sm text-yellow-200">Ronda: {round}/{maxRounds}</span>
             {timer > 0 && (
@@ -741,29 +741,43 @@ function Sala() {
         </div>
         
         <ul className={`space-y-1 overflow-y-auto w-full ${deviceType === 'mobile' ? 'max-h-28' : 'max-h-40 sm:max-h-64'}`}>
-          {players.map(player => (
-            <li 
-              key={player.id} 
-              className={`flex items-center gap-2 p-2 bg-white/10 rounded ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}`}
-            >
-              <span className="flex-1 flex items-center gap-1 truncate">
-                {drawerId === player.id && (
-                  <span className="text-yellow-300 mr-1">✏️</span>
+          {players
+            .sort((a, b) => {
+              // Ordenar: primeiro os online, depois por pontuação, depois por nome
+              if ((a.online === false) !== (b.online === false)) {
+                return a.online === false ? 1 : -1; // Online primeiro
+              }
+              if (b.score !== a.score) {
+                return b.score - a.score; // Maior pontuação primeiro
+              }
+              return a.name.localeCompare(b.name); // Ordem alfabética
+            })
+            .map(player => (
+              <li 
+                key={player.id} 
+                className={`flex items-center gap-2 p-2 rounded 
+                  ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}
+                  ${player.online === false ? 'bg-white/5 opacity-50' : 'bg-white/10'}
+                `}
+              >
+                <span className="flex-1 flex items-center gap-1 truncate">
+                  {drawerId === player.id && (
+                    <span className="text-yellow-300 mr-1">✏️</span>
+                  )}
+                  {player.name}
+                  {player.online === false && (
+                    <span title="Offline" className="ml-1 text-xs text-red-400 flex items-center gap-1 font-bold">
+                      <svg width="8" height="8" viewBox="0 0 10 10" fill="red" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="5" r="5"/></svg>
+                      {deviceType !== 'mobile' && 'offline'}
+                    </span>
+                  )}
+                </span>
+                <span className="text-yellow-300 whitespace-nowrap">{player.score} pts</span>
+                {player.isHost && (
+                  <span className="bg-yellow-300 text-blue-900 text-xs px-1 py-0.5 rounded">HOST</span>
                 )}
-                {player.name}
-                {player.online === false && (
-                  <span title="Offline" className="ml-1 text-xs text-red-400 flex items-center gap-1">
-                    <svg width="8" height="8" viewBox="0 0 10 10" fill="red" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="5" r="5"/></svg>
-                    {deviceType !== 'mobile' && 'offline'}
-                  </span>
-                )}
-              </span>
-              <span className="text-yellow-300 whitespace-nowrap">{player.score} pts</span>
-              {player.isHost && (
-                <span className="bg-yellow-300 text-blue-900 text-xs px-1 py-0.5 rounded">HOST</span>
-              )}
-            </li>
-          ))}
+              </li>
+            ))}
         </ul>
       </div>
     );

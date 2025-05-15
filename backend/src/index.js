@@ -205,6 +205,18 @@ io.on('connection', (socket) => {
       if (playerId) {
         existingPlayer = room.players.find(p => p.playerId === playerId);
       }
+      
+      // Verificar se há um jogador offline com o mesmo nome (para evitar duplicados)
+      const offlinePlayerWithSameName = !existingPlayer ? 
+        room.players.find(p => p.name === userName && p.online === false) : null;
+      
+      if (offlinePlayerWithSameName) {
+        console.log(`Jogador com nome ${userName} estava offline e está reconectando`);
+        // Usar o jogador offline existente em vez de criar um novo
+        existingPlayer = offlinePlayerWithSameName;
+        // Atualizar o playerId para manter consistência
+        existingPlayer.playerId = playerId || socket.id;
+      }
 
       // Se o jogo já começou, só permitir reentrada de quem já estava na sala
       if (room.status !== 'waiting' && !existingPlayer) {
@@ -222,6 +234,20 @@ io.on('connection', (socket) => {
           delete existingPlayer._removeTimeout;
         }
       } else {
+        // Verificar se já existe um jogador online com o mesmo nome
+        const duplicateName = room.players.some(p => p.name === userName && p.online !== false);
+        if (duplicateName) {
+          // Adicionar sufixo numérico para evitar duplicidade
+          let suffix = 1;
+          let newName = `${userName} (${suffix})`;
+          while (room.players.some(p => p.name === newName)) {
+            suffix++;
+            newName = `${userName} (${suffix})`;
+          }
+          userName = newName;
+          console.log(`Nome duplicado. Alterado para: ${userName}`);
+        }
+        
         // Impedir duplicidade de playerId
         if (playerId && room.players.some(p => p.playerId === playerId)) {
           return callback({ success: false, error: 'Já existe um jogador com este ID na sala.' });
@@ -289,6 +315,21 @@ io.on('connection', (socket) => {
         // Encontrar jogador pelo playerId
         const player = room.players.find(p => p.playerId === playerId);
         if (player) {
+          // Verificar se existem outros jogadores offline com o mesmo nome e removê-los
+          // para evitar confusão na interface
+          const otherOfflinePlayers = room.players.filter(p => 
+            p.name === player.name && 
+            p.online === false && 
+            p.playerId !== player.playerId
+          );
+          
+          if (otherOfflinePlayers.length > 0) {
+            console.log(`Removendo ${otherOfflinePlayers.length} jogadores offline duplicados com nome "${player.name}"`);
+            room.players = room.players.filter(p => 
+              !(p.name === player.name && p.online === false && p.playerId !== player.playerId)
+            );
+          }
+          
           // Marcar jogador como offline
           player.online = false;
           // Se o jogador era o desenhista, notificar a sala
