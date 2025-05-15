@@ -252,7 +252,17 @@ function Sala() {
           // Aguardar alguns segundos para mostrar quem acertou antes de exibir o pódio
           setTimeout(() => {
             console.log('Encerrando o jogo e mostrando o pódio');
-            // Emitir evento para o servidor encerrar o jogo
+            // Calcular o pódio localmente
+            const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+            
+            // Primeiro esconder a mensagem de quem acertou
+            setWinnerName(null);
+            
+            // Então mostrar o pódio
+            setPodium(sortedPlayers);
+            
+            // Ainda assim, notificar o servidor sobre o fim do jogo
+            // para garantir a sincronização entre todos os jogadores
             socketService.getSocket().emit('end-game', { roomCode });
           }, 3000);
         }
@@ -421,7 +431,7 @@ function Sala() {
   };
 
   // Função simplificada para desenhar ponto
-  const handleDrawPoint = (point: { x: number; y: number }) => {
+  const handleDrawPoint = (point: { x: number; y: number; pressure?: number }) => {
     if (!isDrawer) return;
     
     // Enviar o ponto para o servidor
@@ -429,7 +439,8 @@ function Sala() {
     socketService.getSocket().emit('draw-point', { 
       roomCode, 
       x: point.x, 
-      y: point.y, 
+      y: point.y,
+      pressure: point.pressure || 0.5,
       color: strokeColor, 
       size: strokeWidth,
       isStartOfLine: lineStartingRef.current,
