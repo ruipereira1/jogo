@@ -62,9 +62,12 @@ function Sala() {
   const pointQueueRef = useRef<{x: number, y: number}[]>([]);
   const [isHost, setIsHost] = useState(false);
   const [points, setPoints] = useState<Array<{x: number, y: number, color?: string, width?: number}>>([]);
+  const [receivedPoints, setReceivedPoints] = useState<any[]>([]);
 
   // Ref para garantir valor atualizado de drawing
   const drawingRef = useRef(false);
+  const clearingRef = useRef(false);
+  const lineStartingRef = useRef(false);
 
   // Detectar tipo de dispositivo para ajustes de UI
   const [deviceType, setDeviceType] = useState<'mobile'|'tablet'|'desktop'>('desktop');
@@ -241,6 +244,18 @@ function Sala() {
       setGuesses(prev => [...prev, { name, text, correct }]);
       if (correct) {
         setWinnerName(name);
+        
+        // Se estamos na última rodada e alguém acertou, terminar o jogo após mostrar o vencedor
+        if (round === maxRounds) {
+          console.log('Última rodada com acerto! Preparando para encerrar o jogo...');
+          
+          // Aguardar alguns segundos para mostrar quem acertou antes de exibir o pódio
+          setTimeout(() => {
+            console.log('Encerrando o jogo e mostrando o pódio');
+            // Emitir evento para o servidor encerrar o jogo
+            socketService.getSocket().emit('end-game', { roomCode });
+          }, 3000);
+        }
       }
       if (correct && name === socketService.getUser()?.name) {
         setGuessedCorrectly(true);
@@ -252,7 +267,22 @@ function Sala() {
     // Para simplificar, estamos apenas adicionando o próprio usuário
     
     socket.on('clear-canvas', () => {
+      console.log('Sala: Recebido evento clear-canvas, limpando desenho');
+      
+      // Flag para evitar loops infinitos
+      const alreadyClearing = clearingRef.current;
+      if (alreadyClearing) return;
+      
+      clearingRef.current = true;
+      
+      // Limpar arrays locais
       setLines([]);
+      setReceivedPoints([]);
+      
+      // Resetar flag após um pequeno delay
+      setTimeout(() => {
+        clearingRef.current = false;
+      }, 100);
     });
 
     socket.on('timer-update', ({ timeLeft }) => {
@@ -309,68 +339,10 @@ function Sala() {
 
     // Receber pontos desenhados de outros jogadores
     socket.on('draw-point', (data) => {
-      // Apenas depuração para ver o que está chegando
       console.log('SALA recebendo draw-point:', data, 'isDrawer:', isDrawer);
       
-      const { x, y, color, size, clientId } = data;
-      
-      // Desenhar diretamente no canvas
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        console.log('Canvas não encontrado');
-        return;
-      }
-      
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        console.log('Contexto do canvas não encontrado');
-        return;
-      }
-      
-      // Coordenadas reais no canvas
-      const canvasX = x * canvas.width;
-      const canvasY = y * canvas.height;
-      
-      // Se for o primeiro ponto deste cliente, apenas desenhe um círculo
-      if (!lastPointsByClientRef.current[clientId]) {
-        console.log('Desenhar ponto inicial para', clientId);
-        ctx.beginPath();
-        ctx.arc(canvasX, canvasY, size/2, 0, Math.PI * 2);
-        ctx.fillStyle = color || '#222';
-        ctx.fill();
-      } else {
-        // Desenhar uma linha do último ponto até este
-        const lastPoint = lastPointsByClientRef.current[clientId];
-        if (lastPoint) {
-          console.log('Desenhar linha para', clientId);
-          const lastX = lastPoint.x * canvas.width;
-          const lastY = lastPoint.y * canvas.height;
-          
-          ctx.beginPath();
-          ctx.moveTo(lastX, lastY);
-          ctx.lineTo(canvasX, canvasY);
-          ctx.strokeStyle = color || '#222';
-          ctx.lineWidth = size || 3;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.stroke();
-        }
-      }
-      
-      // Armazenar este ponto como último para este cliente
-      lastPointsByClientRef.current[clientId] = { x, y };
-      
-      // Resetar o ponto quando o cliente parar de desenhar (com delay)
-      if (lastPointTimerRef.current) {
-        clearTimeout(lastPointTimerRef.current);
-      }
-      
-      lastPointTimerRef.current = setTimeout(() => {
-        if (clientId && lastPointsByClientRef.current) {
-          console.log('Resetando último ponto para', clientId);
-          lastPointsByClientRef.current[clientId] = null;
-        }
-      }, 500);
+      // Em vez de tentar desenhar aqui, apenas armazenamos o ponto recebido
+      setReceivedPoints(prev => [...prev, data]);
     });
 
     setIsLoading(false);
@@ -437,6 +409,17 @@ function Sala() {
     }
   };
 
+  // Função para o início de uma nova linha (mantida para compatibilidade)
+  const handleStartLine = () => {
+    if (!isDrawer) return;
+    console.log('Sala: Iniciando nova linha de desenho');
+    setDrawing(true);
+    drawingRef.current = true;
+    
+    // Marcar o próximo ponto como início de linha
+    lineStartingRef.current = true;
+  };
+
   // Função simplificada para desenhar ponto
   const handleDrawPoint = (point: { x: number; y: number }) => {
     if (!isDrawer) return;
@@ -448,15 +431,15 @@ function Sala() {
       x: point.x, 
       y: point.y, 
       color: strokeColor, 
-      size: strokeWidth 
+      size: strokeWidth,
+      isStartOfLine: lineStartingRef.current,
+      timestamp: Date.now()
     });
-  };
-
-  // Função para o início de uma nova linha (mantida para compatibilidade)
-  const handleStartLine = () => {
-    if (!isDrawer) return;
-    setDrawing(true);
-    drawingRef.current = true;
+    
+    // Resetar flag de início de linha após o primeiro ponto
+    if (lineStartingRef.current) {
+      lineStartingRef.current = false;
+    }
   };
 
   // Função para o fim de uma linha (mantida para compatibilidade)
@@ -466,11 +449,28 @@ function Sala() {
     drawingRef.current = false;
   };
 
-  // Função simplificada para limpar o canvas
+  // Função para limpar o canvas
   const handleClearCanvas = () => {
     if (!isDrawer) return;
+    
+    // Evitar chamadas duplicadas
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    
+    console.log('Sala: Limpando canvas e enviando evento clear-canvas');
+    
+    // Limpar arrays locais
     setPoints([]);
+    setReceivedPoints([]);
+    setLines([]);
+    
+    // Enviar evento para o servidor
     socketService.getSocket().emit('clear-canvas', { roomCode });
+    
+    // Resetar flag após um pequeno delay
+    setTimeout(() => {
+      clearingRef.current = false;
+    }, 100);
   };
 
   useEffect(() => {
@@ -635,6 +635,7 @@ function Sala() {
               strokeWidth={strokeWidth}
               onColorChange={setStrokeColor}
               onWidthChange={setStrokeWidth}
+              receivedPoints={receivedPoints}
             />
           </div>
           
@@ -657,6 +658,7 @@ function Sala() {
             onEndLine={handleEndLine}
             strokeColor={strokeColor}
             strokeWidth={strokeWidth}
+            receivedPoints={receivedPoints}
           />
         </div>
         

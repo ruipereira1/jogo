@@ -588,6 +588,33 @@ io.on('connection', (socket) => {
     
     console.log(`BACKEND enviou ponto para sala ${roomCode}, total jogadores: ${room.players.length}`);
   });
+  
+  // Encerrar o jogo quando alguém acerta na última rodada
+  socket.on('end-game', ({ roomCode }) => {
+    console.log(`Recebido pedido para encerrar o jogo na sala ${roomCode}`);
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    
+    // Limpar qualquer timer ativo
+    if (room.timerInterval) {
+      clearInterval(room.timerInterval);
+    }
+    
+    // Definir o status da sala como finalizado
+    room.status = 'finished';
+    
+    // Ordenar jogadores por pontuação
+    const sortedPlayers = [...room.players].sort((a, b) => b.score - a.score);
+    
+    // Enviar evento de fim de jogo com o pódio
+    io.to(roomCode).emit('game-ended', {
+      players: sortedPlayers.map(({ id, playerId, name, score, isHost, online }) => ({
+        id, playerId, name, score, isHost, online
+      }))
+    });
+    
+    console.log(`Jogo encerrado na sala ${roomCode}. Pódio: ${sortedPlayers.map(p => p.name + ' (' + p.score + ')').join(', ')}`);
+  });
 });
 
 const PORT = process.env.PORT || 4000;
