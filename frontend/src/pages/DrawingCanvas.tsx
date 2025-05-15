@@ -1,18 +1,13 @@
 import React, { useRef, useEffect, useState } from 'react';
 
 interface Point { x: number; y: number; }
-interface Line { 
-  points: Point[]; 
-  color?: string;
-  width?: number;
-}
 
 interface Props {
-  lines: Line[];
   onDraw?: (point: Point) => void;
   isDrawer: boolean;
   onStartLine?: () => void;
   onEndLine?: () => void;
+  onClear?: () => void;
   strokeColor?: string;
   strokeWidth?: number;
   onColorChange?: (color: string) => void;
@@ -23,11 +18,11 @@ const COLORS = ['#000000', '#FF0000', '#0000FF', '#008000', '#FFA500', '#800080'
 const WIDTHS = [1, 3, 5, 8, 12];
 
 const DrawingCanvas: React.FC<Props> = ({ 
-  lines, 
   onDraw, 
   isDrawer, 
   onStartLine, 
   onEndLine,
+  onClear,
   strokeColor = '#222',
   strokeWidth = 3,
   onColorChange,
@@ -37,7 +32,6 @@ const DrawingCanvas: React.FC<Props> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const toolboxRef = useRef<HTMLDivElement | null>(null);
   const drawing = useRef(false);
-  const lastPoint = useRef<Point | null>(null);
   const [showTools, setShowTools] = useState(false);
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   const [touchActive, setTouchActive] = useState(false);
@@ -101,76 +95,36 @@ const DrawingCanvas: React.FC<Props> = ({
     };
   }, [isDrawer]);
 
-  // Desenhar as linhas recebidas
-  useEffect(() => {
+  // Função para desenhar um ponto no canvas
+  const drawPoint = (x: number, y: number, color: string = strokeColor || '#222', width: number = strokeWidth || 3) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    lines.forEach(line => {
-      if (!line.points || !line.points.length) return;
-      
-      ctx.beginPath();
-      ctx.strokeStyle = line.color || '#222';
-      ctx.lineWidth = line.width || 3;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      
-      // Suavização de linha melhorada
-      if (line.points.length === 1) {
-        // Se só temos um ponto, desenhamos um círculo
-        const pt = line.points[0];
-        ctx.beginPath();
-        ctx.arc(pt.x * canvas.width, pt.y * canvas.height, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fillStyle = line.color || '#222';
-        ctx.fill();
-      } else if (line.points.length === 2) {
-        // Se temos apenas 2 pontos, desenhamos uma linha reta
-        ctx.moveTo(line.points[0].x * canvas.width, line.points[0].y * canvas.height);
-        ctx.lineTo(line.points[1].x * canvas.width, line.points[1].y * canvas.height);
-      } else {
-        // Para 3 ou mais pontos, usamos curvas de Catmull-Rom para suavização natural
-        ctx.moveTo(line.points[0].x * canvas.width, line.points[0].y * canvas.height);
-        
-        // Implementação simplificada de Catmull-Rom splines para suavização natural
-        const tension = 0.5; // Controla a "tensão" da curva - valores entre 0.3 e 0.6 são bons
-        
-        for (let i = 0; i < line.points.length - 1; i++) {
-          const p0 = line.points[Math.max(i - 1, 0)];
-          const p1 = line.points[i];
-          const p2 = line.points[i + 1];
-          const p3 = line.points[Math.min(i + 2, line.points.length - 1)];
-          
-          // Criar pontos de controle para spline mais natural
-          for (let t = 0; t <= 1; t += 0.1) {
-            const t2 = t * t;
-            const t3 = t2 * t;
-            
-            // Catmull-Rom spline
-            const x = 0.5 * (
-              (2 * p1.x) +
-              (-p0.x + p2.x) * t +
-              (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-              (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
-            );
-            
-            const y = 0.5 * (
-              (2 * p1.y) +
-              (-p0.y + p2.y) * t +
-              (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-              (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
-            );
-            
-            ctx.lineTo(x * canvas.width, y * canvas.height);
-          }
-        }
-      }
-      
-      ctx.stroke();
-    });
-  }, [lines]);
+    // Coordenadas reais no canvas
+    const canvasX = x * canvas.width;
+    const canvasY = y * canvas.height;
+    
+    // Desenha um círculo (ponto) na posição
+    ctx.beginPath();
+    ctx.arc(canvasX, canvasY, width/2, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+  };
+
+  // Limpar o canvas
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    onClear?.();
+  };
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (!isDrawer) return;
@@ -184,8 +138,10 @@ const DrawingCanvas: React.FC<Props> = ({
     
     drawing.current = true;
     setTouchActive(true);
-    lastPoint.current = { x, y };
-    onStartLine && onStartLine();
+    onStartLine?.();
+    
+    // Desenhar ponto inicial
+    drawPoint(x, y);
     onDraw?.({ x, y });
     
     // Desativar temporariamente o scroll da página
@@ -205,15 +161,8 @@ const DrawingCanvas: React.FC<Props> = ({
     const x = (touch.clientX - rect.left) / rect.width;
     const y = (touch.clientY - rect.top) / rect.height;
     
-    // Reduzir o threshold para capturar movimentos menores
-    if (lastPoint.current) {
-      const dx = Math.abs(x - lastPoint.current.x);
-      const dy = Math.abs(y - lastPoint.current.y);
-      // Threshold reduzido para mais sensibilidade
-      if (dx < 0.001 && dy < 0.001) return;
-    }
-    
-    lastPoint.current = { x, y };
+    // Desenhar ponto
+    drawPoint(x, y);
     onDraw?.({ x, y });
   };
 
@@ -223,8 +172,7 @@ const DrawingCanvas: React.FC<Props> = ({
     
     drawing.current = false;
     setTouchActive(false);
-    lastPoint.current = null;
-    onEndLine && onEndLine();
+    onEndLine?.();
     
     // Reativar o scroll da página
     if (containerRef.current) {
@@ -239,13 +187,14 @@ const DrawingCanvas: React.FC<Props> = ({
     e.preventDefault();
     
     drawing.current = true;
-    onStartLine && onStartLine();
+    onStartLine?.();
     
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     
-    lastPoint.current = { x, y };
+    // Desenhar ponto inicial
+    drawPoint(x, y);
     onDraw?.({ x, y });
   };
 
@@ -257,15 +206,8 @@ const DrawingCanvas: React.FC<Props> = ({
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     
-    // Reduzir o threshold para capturar movimentos menores
-    if (lastPoint.current) {
-      const dx = Math.abs(x - lastPoint.current.x);
-      const dy = Math.abs(y - lastPoint.current.y);
-      // Threshold reduzido para mais sensibilidade
-      if (dx < 0.001 && dy < 0.001) return;
-    }
-    
-    lastPoint.current = { x, y };
+    // Desenhar ponto
+    drawPoint(x, y);
     onDraw?.({ x, y });
   };
 
@@ -274,8 +216,7 @@ const DrawingCanvas: React.FC<Props> = ({
     e.preventDefault();
     
     drawing.current = false;
-    lastPoint.current = null;
-    onEndLine && onEndLine();
+    onEndLine?.();
   };
 
   const toggleTools = (e: React.MouseEvent) => {
@@ -372,6 +313,16 @@ const DrawingCanvas: React.FC<Props> = ({
               </button>
             ))}
           </div>
+
+          <button
+            className="bg-red-500 text-white px-2 py-1 rounded text-sm ml-auto"
+            onClick={(e) => {
+              e.stopPropagation();
+              clearCanvas();
+            }}
+          >
+            Limpar
+          </button>
         </div>
       )}
       

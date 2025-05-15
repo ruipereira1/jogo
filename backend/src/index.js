@@ -169,13 +169,17 @@ io.on('connection', (socket) => {
         maxRounds: rounds || 3,
         timePerRound: 60,
         difficulty: difficulty || 'facil',
-        lines: [] // Guardar linhas desenhadas
+        lines: [], // Guardar linhas desenhadas
+        points: [], // Adicionado para armazenar pontos individuais
+        guessedPlayers: [],
+        wordOptions: []
       });
       // Associar o socket à sala
       socket.join(roomCode);
       socket.data.roomCode = roomCode;
       socket.data.userName = userName;
       console.log(`Sala ${roomCode} criada por ${userName}`);
+      pendingPointsByRoom.set(roomCode, []);
       callback({ success: true, roomCode });
     } catch (error) {
       console.error('Erro ao criar sala:', error);
@@ -504,7 +508,14 @@ io.on('connection', (socket) => {
     if (!roomCode) return;
     const room = rooms.get(roomCode);
     if (!room) return;
+    
+    // Limpar os pontos e linhas
     room.lines = [];
+    if (room.points) {
+      room.points = [];
+    }
+    
+    // Notificar todos na sala
     io.to(roomCode).emit('clear-canvas');
   });
 
@@ -538,6 +549,24 @@ io.on('connection', (socket) => {
       timer: room._lastTimeLeft || 0,
       podium: room.status === 'finished' ? [...room.players].sort((a, b) => b.score - a.score) : null
     });
+  });
+
+  // Novo manipulador para desenho por pontos
+  socket.on('draw-point', ({ roomCode, x, y, color, size }) => {
+    if (!roomCode) return;
+    const room = rooms.get(roomCode);
+    if (!room) {
+      console.log('Sala não encontrada:', roomCode);
+      return;
+    }
+    
+    // Adicionar ponto ao histórico da sala (opcional, se quiser manter histórico)
+    if (room.points) {
+      room.points.push({ x, y, color, size });
+    }
+    
+    // Repassar o ponto para todos os jogadores na sala
+    io.to(roomCode).emit('draw-point', { x, y, color, size });
   });
 });
 

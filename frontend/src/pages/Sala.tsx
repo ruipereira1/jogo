@@ -60,6 +60,8 @@ function Sala() {
   // Ref para debouncing do envio de pontos
   const lastSentRef = useRef<number>(0);
   const pointQueueRef = useRef<{x: number, y: number}[]>([]);
+  const [isHost, setIsHost] = useState(false);
+  const [points, setPoints] = useState<Array<{x: number, y: number, color?: string, width?: number}>>([]);
 
   // Ref para garantir valor atualizado de drawing
   const drawingRef = useRef(false);
@@ -302,6 +304,26 @@ function Sala() {
       setTimeout(() => setRemovedByTimeout(false), 8000);
     });
 
+    // Adicionar manipulador para desenho por pontos
+    socket.on('draw-point', (data) => {
+      const { x, y, color, size } = data;
+      // Desenhar diretamente no canvas
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      // Desenhar o ponto recebido
+      const canvasX = x * canvas.width;
+      const canvasY = y * canvas.height;
+      
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, size/2, 0, Math.PI * 2);
+      ctx.fillStyle = color || strokeColor;
+      ctx.fill();
+    });
+
     setIsLoading(false);
 
     return () => {
@@ -322,6 +344,7 @@ function Sala() {
       socket.off('drawer-left');
       socket.off('host-left');
       socket.off('removed-by-timeout');
+      socket.off('draw-point');
     };
   }, [roomCode, navigate]);
 
@@ -365,168 +388,39 @@ function Sala() {
     }
   };
 
-  // Função para manipular o desenho (agora via DrawingCanvas)
+  // Função simplificada para desenhar ponto
   const handleDrawPoint = (point: { x: number; y: number }) => {
     if (!isDrawer) return;
     
-    // Atualiza localmente
-    setLines(prev => {
-      if (!prev.length || !drawing) {
-        const novaLinha = { points: [point], color: strokeColor, width: strokeWidth };
-        console.log('NOVA LINHA LOCAL:', novaLinha);
-        return [...prev, novaLinha];
-      } else {
-        const newLines = [...prev];
-        if (!newLines[newLines.length - 1].points) newLines[newLines.length - 1].points = [];
-        
-        // Aplicar interpolação para pontos intermediários se o movimento for muito rápido
-        const lastLineIndex = newLines.length - 1;
-        const lastPoints = newLines[lastLineIndex].points;
-        const lastPoint = lastPoints[lastPoints.length - 1];
-        
-        // Se a distância é significativa, adicionar pontos intermediários para melhor fluidez
-        const dx = point.x - lastPoint.x;
-        const dy = point.y - lastPoint.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance > 0.03) { // Se o movimento foi rápido (distância grande)
-          const steps = Math.ceil(distance / 0.01); // Determinar número de passos
-          for (let i = 1; i < steps; i++) {
-            const ratio = i / steps;
-            const interpolatedPoint = {
-              x: lastPoint.x + dx * ratio,
-              y: lastPoint.y + dy * ratio
-            };
-            newLines[lastLineIndex].points.push(interpolatedPoint);
-          }
-        }
-        
-        // Adicionar o ponto real
-        newLines[lastLineIndex].points.push(point);
-        
-        console.log('ADICIONANDO PONTO À LINHA LOCAL:', point, newLines);
-        return newLines;
-      }
+    // Envia o ponto diretamente para o servidor
+    const socket = socketService.getSocket();
+    socket.emit('draw-point', { 
+      roomCode, 
+      x: point.x, 
+      y: point.y, 
+      color: strokeColor, 
+      size: strokeWidth 
     });
-    
-    // Adicionar à fila de pontos para envio limitado
-    pointQueueRef.current.push(point);
-    
-    // Limitar a frequência de envio ao servidor (debounce)
-    const now = Date.now();
-    if (now - lastSentRef.current > 30) { // Limite de 30ms (~33fps)
-      // Enviar pontos acumulados
-      if (pointQueueRef.current.length > 0) {
-        const socket = socketService.getSocket();
-        // Envia apenas o ponto mais recente para reduzir tráfego
-        const latestPoint = pointQueueRef.current[pointQueueRef.current.length - 1];
-        socket.emit('draw-line', { roomCode, point: latestPoint, color: strokeColor, width: strokeWidth });
-        pointQueueRef.current = []; // Limpa a fila
-        lastSentRef.current = now;
-      }
-    }
   };
 
+  // Função para o início de uma nova linha (mantida para compatibilidade)
   const handleStartLine = () => {
     if (!isDrawer) return;
     setDrawing(true);
     drawingRef.current = true;
-    console.log('Iniciando nova linha de desenho');
   };
 
+  // Função para o fim de uma linha (mantida para compatibilidade)
   const handleEndLine = () => {
     if (!isDrawer) return;
     setDrawing(false);
     drawingRef.current = false;
-    
-    // Certifica-se de que todos os pontos restantes da fila sejam processados
-    if (pointQueueRef.current.length > 0) {
-      const socket = socketService.getSocket();
-      const latestPoint = pointQueueRef.current[pointQueueRef.current.length - 1];
-      socket.emit('draw-line', { roomCode, point: latestPoint, color: strokeColor, width: strokeWidth });
-      pointQueueRef.current = []; // Limpa a fila
-    }
-    
-    // Envia a linha completa
-    if (lines.length > 0) {
-      const socket = socketService.getSocket();
-      const lastLine = lines[lines.length - 1];
-      socket.emit('draw-line', { roomCode, line: lastLine, color: strokeColor, width: strokeWidth });
-      console.log('Enviada linha completa ao finalizar traço (via DrawingCanvas)', lastLine);
-    }
   };
 
-  // Adicionamos um useEffect para prevenir scroll no corpo da página quando estiver desenhando
-  useEffect(() => {
-    const preventBodyScroll = (e: TouchEvent) => {
-      if (isDrawer && drawing) {
-        e.preventDefault();
-      }
-    };
-
-    const options = { passive: false };
-    
-    if (isDrawer) {
-      document.body.addEventListener('touchmove', preventBodyScroll, options);
-    }
-    
-    return () => {
-      document.body.removeEventListener('touchmove', preventBodyScroll);
-    };
-  }, [isDrawer, drawing]);
-
-  // Desenhar no canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    try {
-      // Ajustar para alta resolução
-      const dpr = window.devicePixelRatio || 1;
-      // Guardar tamanhos lógicos
-      const logicalWidth = canvasWidth;
-      const logicalHeight = canvasHeight;
-      canvas.width = logicalWidth * dpr;
-      canvas.height = logicalHeight * dpr;
-      canvas.style.width = logicalWidth + 'px';
-      canvas.style.height = logicalHeight + 'px';
-      ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
-      ctx.scale(dpr, dpr);
-
-      ctx.clearRect(0, 0, logicalWidth, logicalHeight);
-      ctx.strokeStyle = '#222';
-      // Largura do traço maior no mobile
-      ctx.lineWidth = window.innerWidth < 640 ? 6 : 3;
-      ctx.lineCap = 'round';
-      lines.forEach(line => {
-        if (!line.points || !Array.isArray(line.points)) return;
-        ctx.beginPath();
-        line.points.forEach((pt: any, i: number) => {
-          if (typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
-          const x = pt.x * logicalWidth;
-          const y = pt.y * logicalHeight;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-      });
-    } catch (err) {
-      console.error('Erro ao desenhar no canvas:', err);
-    }
-  }, [lines, isDrawer, canvasWidth, canvasHeight, isTouchDrawing]);
-
-  const handleGuessSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!guess.trim() || guessedCorrectly) return;
-    socketService.getSocket().emit('guess', { roomCode, text: guess });
-    setGuess('');
-  };
-
-  // Função para apagar o desenho
+  // Função simplificada para limpar o canvas
   const handleClearCanvas = () => {
-    setLines([]);
+    if (!isDrawer) return;
+    setPoints([]);
     socketService.getSocket().emit('clear-canvas', { roomCode });
   };
 
@@ -683,25 +577,16 @@ function Sala() {
           
           <div className={deviceType === 'mobile' ? 'mt-2' : 'mt-4'}>
             <DrawingCanvas
-              lines={lines}
-              isDrawer={isDrawer}
               onDraw={handleDrawPoint}
+              isDrawer={isDrawer}
               onStartLine={handleStartLine}
               onEndLine={handleEndLine}
+              onClear={handleClearCanvas}
               strokeColor={strokeColor}
               strokeWidth={strokeWidth}
               onColorChange={setStrokeColor}
               onWidthChange={setStrokeWidth}
             />
-          </div>
-          
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <button
-              onClick={handleClearCanvas}
-              className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition flex items-center gap-1"
-            >
-              <span role="img" aria-label="limpar">🧹</span> Apagar desenho
-            </button>
           </div>
           
           <p className="text-sm opacity-70 mt-2">Desenhe algo relacionado à palavra!</p>
@@ -717,9 +602,8 @@ function Sala() {
         
         <div className={deviceType === 'mobile' ? 'mt-2' : 'mt-4'}>
           <DrawingCanvas
-            lines={lines}
-            isDrawer={isDrawer}
             onDraw={handleDrawPoint}
+            isDrawer={isDrawer}
             onStartLine={handleStartLine}
             onEndLine={handleEndLine}
             strokeColor={strokeColor}
@@ -856,6 +740,14 @@ function Sala() {
         )}
       </div>
     );
+  };
+
+  // Removido acidentalmente
+  const handleGuessSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guess.trim() || guessedCorrectly) return;
+    socketService.getSocket().emit('guess', { roomCode, text: guess });
+    setGuess('');
   };
 
   if (isLoading) {
