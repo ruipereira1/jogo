@@ -1,6 +1,10 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-interface Point { x: number; y: number; }
+interface Point { 
+  x: number; 
+  y: number; 
+  pressure?: number;
+}
 
 interface Props {
   onDraw?: (point: Point) => void;
@@ -35,14 +39,46 @@ const DrawingCanvas: React.FC<Props> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const toolboxRef = useRef<HTMLDivElement | null>(null);
-  const drawing = useRef(false);
-  const lastPoint = useRef<Point | null>(null);
+  const contextRef = useRef<CanvasRenderingContext2D | null>(null);
+  const isDrawingRef = useRef(false);
+  const lastPointRef = useRef<Point | null>(null);
+  const pointsRef = useRef<Point[]>([]);
   const [showTools, setShowTools] = useState(false);
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   const [touchActive, setTouchActive] = useState(false);
   const processedPointsRef = useRef<Set<string>>(new Set());
   const [toolPosition, setToolPosition] = useState<ToolbarPosition>('top');
   const [isMinimized, setIsMinimized] = useState(false);
+  const lastClientPointsRef = useRef<{[key: string]: Point[]}>({});
+
+  // Função de inicialização do canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Configurar o contexto do canvas
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+    
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth;
+    contextRef.current = ctx;
+    
+    // Limpar o canvas inicialmente
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }, []);
+
+  // Atualizar o estilo de linha quando as props mudam
+  useEffect(() => {
+    const ctx = contextRef.current;
+    if (!ctx) return;
+    
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth;
+  }, [strokeColor, strokeWidth]);
 
   // Detectar se é dispositivo móvel
   useEffect(() => {
@@ -65,108 +101,276 @@ const DrawingCanvas: React.FC<Props> = ({
     return () => window.removeEventListener('resize', detectMobile);
   }, []);
 
+  // Função de suavização de curva
+  const smoothLine = (points: Point[]): Point[] => {
+    if (points.length < 3) return points;
+    
+    const smoothed: Point[] = [];
+    
+    // Manter o primeiro ponto
+    smoothed.push(points[0]);
+    
+    // Calcular pontos de controle para cada segmento
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+      
+      // Ponto médio entre pontos adjacentes
+      const midPoint: Point = {
+        x: (curr.x + next.x) / 2,
+        y: (curr.y + next.y) / 2,
+        pressure: curr.pressure
+      };
+      
+      smoothed.push(curr);
+      smoothed.push(midPoint);
+    }
+    
+    // Manter o último ponto
+    smoothed.push(points[points.length - 1]);
+    
+    return smoothed;
+  };
+
+  // Desenhar uma curva suave baseada em pontos
+  const drawSmoothLine = (ctx: CanvasRenderingContext2D, points: Point[], color: string, width: number) => {
+    if (points.length < 2) return;
+    
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    
+    // Mover para o primeiro ponto
+    ctx.moveTo(points[0].x * ctx.canvas.width, points[0].y * ctx.canvas.height);
+    
+    // Para cada par de pontos, desenhar uma curva quadrática
+    for (let i = 1; i < points.length - 1; i += 2) {
+      const controlPoint = points[i];
+      const endPoint = points[i + 1];
+      
+      ctx.quadraticCurveTo(
+        controlPoint.x * ctx.canvas.width, 
+        controlPoint.y * ctx.canvas.height,
+        endPoint.x * ctx.canvas.width, 
+        endPoint.y * ctx.canvas.height
+      );
+    }
+    
+    // Se houver um número ímpar de pontos, desenhar até o último
+    if (points.length % 2 === 0) {
+      const lastPoint = points[points.length - 1];
+      ctx.lineTo(lastPoint.x * ctx.canvas.width, lastPoint.y * ctx.canvas.height);
+    }
+    
+    ctx.stroke();
+    ctx.restore();
+  };
+
   // Efeito para processar pontos recebidos quando não é o desenhista
   useEffect(() => {
     if (isDrawer || !receivedPoints || receivedPoints.length === 0) return;
     
-    console.log(`DrawingCanvas: Processando ${receivedPoints.length} pontos recebidos (espectador)`);
-    
-    // Agrupar pontos por clientId e por linha (usando timestamps)
-    const pointsByClientAndLine: {[key: string]: any[][]} = {};
-    
-    receivedPoints.forEach(point => {
-      const clientId = point.clientId || 'default';
-      if (!pointsByClientAndLine[clientId]) {
-        pointsByClientAndLine[clientId] = [];
-      }
-      
-      // Adicionar marcador para nova linha
-      if (point.isStartOfLine) {
-        pointsByClientAndLine[clientId].push([]);
-      }
-      
-      // Se ainda não houver nenhuma linha, criar a primeira
-      if (pointsByClientAndLine[clientId].length === 0) {
-        pointsByClientAndLine[clientId].push([]);
-      }
-      
-      // Adicionar ponto à linha atual
-      const currentLineIndex = pointsByClientAndLine[clientId].length - 1;
-      const currentLine = pointsByClientAndLine[clientId][currentLineIndex];
-      
-      // Verificar se devemos iniciar uma nova linha baseado no tempo
-      if (currentLine.length > 0) {
-        const lastPoint = currentLine[currentLine.length - 1];
-        // Se a diferença de tempo for muito grande, isso pode indicar uma nova linha
-        if (point.timestamp && lastPoint.timestamp && 
-            point.timestamp - lastPoint.timestamp > 1000) { // 1 segundo de diferença
-          pointsByClientAndLine[clientId].push([point]);
-          return;
-        }
-        
-        // Se a distância entre pontos for muito grande, provavelmente é uma nova linha
-        const dx = point.x - lastPoint.x;
-        const dy = point.y - lastPoint.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance > 0.1) { // 10% da dimensão do canvas
-          pointsByClientAndLine[clientId].push([point]);
-          return;
-        }
-      }
-      
-      currentLine.push(point);
-    });
-    
-    // Limpar o canvas antes de desenhar
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Agrupar pontos por clientId 
+    const pointsByClient: {[key: string]: Point[]} = {};
     
-    // Desenhar cada linha de cada cliente
-    Object.values(pointsByClientAndLine).forEach(clientLines => {
-      clientLines.forEach(line => {
-        if (line.length < 1) return;
+    // Processar pontos recebidos
+    receivedPoints.forEach(p => {
+      const clientId = p.clientId || 'default';
+      
+      // Criar o array para o cliente se não existir
+      if (!pointsByClient[clientId]) {
+        pointsByClient[clientId] = [];
+      }
+      
+      // Se for começo de nova linha, processar a linha atual e começar nova
+      if (p.isStartOfLine && pointsByClient[clientId].length > 0) {
+        // Processar linha atual
+        const smoothedPoints = smoothLine(pointsByClient[clientId]);
+        drawSmoothLine(ctx, smoothedPoints, p.color || '#222', p.size || 3);
         
-        // Resetar o último ponto para começar uma nova linha
-        lastPoint.current = null;
-        
-        line.forEach(point => {
-          // Se o ponto tiver coordenadas inválidas, ignore
-          if (typeof point.x !== 'number' || typeof point.y !== 'number') {
-            console.warn('Ponto recebido com coordenadas inválidas:', point);
-            return;
-          }
-          
-          // Desenhar o ponto conectando com o anterior
-          drawPoint(point.x, point.y, point.color, point.size, false);
-        });
-        
-        // Resetar para a próxima linha
-        lastPoint.current = null;
+        // Limpar pontos deste cliente
+        pointsByClient[clientId] = [];
+      }
+      
+      // Adicionar ponto
+      pointsByClient[clientId].push({
+        x: p.x,
+        y: p.y,
+        pressure: p.pressure || 0.5
       });
+    });
+    
+    // Desenhar linhas restantes para cada cliente
+    Object.entries(pointsByClient).forEach(([clientId, points]) => {
+      if (points.length > 0) {
+        // Obter cor e tamanho do último ponto (mais recente)
+        const lastPoint = points[points.length - 1];
+        const color = lastPoint.color || '#222';
+        const size = lastPoint.size || 3;
+        
+        const smoothedPoints = smoothLine(points);
+        drawSmoothLine(ctx, smoothedPoints, color, size);
+        
+        // Salvar pontos para a próxima atualização
+        lastClientPointsRef.current[clientId] = points;
+      }
     });
   }, [receivedPoints, isDrawer]);
    
-  // Efeito para limpar o canvas quando recebemos o evento de limpeza
-  useEffect(() => {
-    if (receivedPoints.length === 0) {
-      // Para evitar loops infinitos, não chamar onClear aqui
-      // Apenas limpar o canvas localmente
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      lastPoint.current = null;
-      processedPointsRef.current.clear();
+  // Limpar o canvas
+  const clearCanvas = () => {
+    console.log('DrawingCanvas: Executando clearCanvas');
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      console.log('Canvas não encontrado ao tentar limpar');
+      return;
     }
-  }, [receivedPoints]);
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      console.log('Contexto 2d não encontrado ao tentar limpar');
+      return;
+    }
+    
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    lastPointRef.current = null;
+    pointsRef.current = [];
+    lastClientPointsRef.current = {};
+    
+    // Notificar a sala sobre a limpeza
+    console.log('DrawingCanvas chamando onClear');
+    onClear?.();
+  };
+
+  // Event handler unificado para pointer events
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (!isDrawer) return;
+    
+    // Ignorar eventos na toolbox
+    if (toolboxRef.current && toolboxRef.current.contains(e.target as Node)) {
+      return;
+    }
+    
+    e.preventDefault();
+    
+    // Capturar ponteiro para receber todos os eventos, mesmo fora do canvas
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.setPointerCapture(e.pointerId);
+    }
+    
+    // Iniciar desenho
+    isDrawingRef.current = true;
+    setTouchActive(true);
+    
+    // Obter coordenadas normalizadas (0-1)
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    
+    // Iniciar nova linha
+    lastPointRef.current = { x, y, pressure: e.pressure || 0.5 };
+    pointsRef.current = [{ x, y, pressure: e.pressure || 0.5 }];
+    
+    // Notificar início de linha
+    onStartLine?.();
+    
+    // Notificar ponto
+    onDraw?.({ x, y, pressure: e.pressure });
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDrawer || !isDrawingRef.current) return;
+    
+    // Ignorar eventos na toolbox
+    if (toolboxRef.current && toolboxRef.current.contains(e.target as Node)) {
+      return;
+    }
+    
+    e.preventDefault();
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = contextRef.current;
+    if (!ctx) return;
+    
+    // Obter coordenadas normalizadas (0-1)
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    
+    const newPoint = { x, y, pressure: e.pressure || 0.5 };
+    
+    // Adicionar ponto ao array
+    pointsRef.current.push(newPoint);
+    
+    // Se temos pontos suficientes, desenhar uma curva suave
+    if (pointsRef.current.length >= 3) {
+      // Obter os últimos pontos para desenhar
+      const pointsToSmooth = pointsRef.current.slice(-3);
+      const smoothedPoints = smoothLine(pointsToSmooth);
+      
+      // Desenhar localmente
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = strokeWidth;
+      drawSmoothLine(ctx, smoothedPoints, strokeColor, strokeWidth);
+      
+      // Notificar servidor sobre o novo ponto
+      onDraw?.(newPoint);
+    } else {
+      // Se temos poucos pontos, desenhar linha reta
+      const lastPoint = lastPointRef.current;
+      if (lastPoint) {
+        ctx.beginPath();
+        ctx.moveTo(lastPoint.x * canvas.width, lastPoint.y * canvas.height);
+        ctx.lineTo(x * canvas.width, y * canvas.height);
+        ctx.stroke();
+        
+        // Notificar servidor sobre o novo ponto
+        onDraw?.(newPoint);
+      }
+    }
+    
+    // Atualizar último ponto
+    lastPointRef.current = newPoint;
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!isDrawer) return;
+    
+    // Ignorar eventos na toolbox
+    if (toolboxRef.current && toolboxRef.current.contains(e.target as Node)) {
+      return;
+    }
+    
+    e.preventDefault();
+    
+    // Liberar captura do ponteiro
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+    
+    isDrawingRef.current = false;
+    setTouchActive(false);
+    
+    // Notificar fim de linha
+    onEndLine?.();
+    
+    // Resetar pontos
+    pointsRef.current = [];
+    lastPointRef.current = null;
+  };
 
   // Fechar ferramentas quando clicar fora delas
   useEffect(() => {
@@ -194,14 +398,13 @@ const DrawingCanvas: React.FC<Props> = ({
   // Prevenir scroll quando estiver desenhando em dispositivo móvel
   useEffect(() => {
     const preventScroll = (e: Event) => {
-      if (drawing.current && isDrawer) {
+      if (isDrawingRef.current && isDrawer) {
         e.preventDefault();
       }
     };
 
     const options = { passive: false };
     
-    // Adicionar ao document para capturar em qualquer lugar
     if (isDrawer) {
       document.addEventListener('touchmove', preventScroll, options);
       document.addEventListener('touchstart', preventScroll, options);
@@ -212,198 +415,6 @@ const DrawingCanvas: React.FC<Props> = ({
       document.removeEventListener('touchstart', preventScroll);
     };
   }, [isDrawer]);
-
-  // Função para desenhar um ponto no canvas - modificada para desenhar linhas
-  const drawPoint = (x: number, y: number, color: string = strokeColor || '#222', width: number = strokeWidth || 3, shouldNotify: boolean = true) => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      console.log('Canvas não encontrado em DrawingCanvas');
-      return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      console.log('Contexto 2d não encontrado em DrawingCanvas');
-      return;
-    }
-    
-    // Coordenadas reais no canvas
-    const canvasX = x * canvas.width;
-    const canvasY = y * canvas.height;
-    
-    console.log('DrawingCanvas.drawPoint:', { x, y, color, canvasX, canvasY, isDrawer, shouldNotify });
-    
-    // Se for o primeiro ponto de uma linha, apenas armazene-o
-    if (!lastPoint.current) {
-      // Para ponto individual, desenhe um círculo
-      ctx.beginPath();
-      ctx.arc(canvasX, canvasY, width/2, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-    } else {
-      // Desenha uma linha do último ponto até este
-      ctx.beginPath();
-      
-      // Ponto anterior
-      const prevX = lastPoint.current.x * canvas.width;
-      const prevY = lastPoint.current.y * canvas.height;
-      
-      // Configurar estilo da linha
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      
-      // Desenhar a linha
-      ctx.moveTo(prevX, prevY);
-      ctx.lineTo(canvasX, canvasY);
-      ctx.stroke();
-    }
-    
-    // Atualizar último ponto
-    lastPoint.current = { x, y };
-    
-    // Notificar a sala sobre o ponto APENAS se for o desenhista e shouldNotify for true
-    if (isDrawer && shouldNotify) {
-      console.log('DrawingCanvas enviando ponto:', x, y);
-      onDraw?.({ x, y });
-    }
-  };
-
-  // Limpar o canvas
-  const clearCanvas = () => {
-    console.log('DrawingCanvas: Executando clearCanvas');
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      console.log('Canvas não encontrado ao tentar limpar');
-      return;
-    }
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      console.log('Contexto 2d não encontrado ao tentar limpar');
-      return;
-    }
-    
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    lastPoint.current = null;  // Resetar o último ponto
-    processedPointsRef.current.clear(); // Limpar o registro de pontos processados
-    
-    // Notificar a sala sobre a limpeza
-    console.log('DrawingCanvas chamando onClear');
-    onClear?.();
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const touch = e.touches[0];
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = (touch.clientX - rect.left) / rect.width;
-    const y = (touch.clientY - rect.top) / rect.height;
-    
-    drawing.current = true;
-    setTouchActive(true);
-    lastPoint.current = null;  // Resetar o último ponto para começar nova linha
-    onStartLine?.();
-    
-    // Desenhar ponto inicial
-    drawPoint(x, y);
-    
-    // Desativar temporariamente o scroll da página
-    if (containerRef.current) {
-      containerRef.current.style.overflowY = 'hidden';
-      containerRef.current.style.touchAction = 'none';
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDrawer || !drawing.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const touch = e.touches[0];
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = (touch.clientX - rect.left) / rect.width;
-    const y = (touch.clientY - rect.top) / rect.height;
-    
-    // Desenhar ponto
-    drawPoint(x, y);
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
-    e.preventDefault();
-    
-    drawing.current = false;
-    setTouchActive(false);
-    lastPoint.current = null;  // Resetar último ponto ao terminar a linha
-    onEndLine?.();
-    
-    // Reativar o scroll da página
-    if (containerRef.current) {
-      containerRef.current.style.overflowY = '';
-      containerRef.current.style.touchAction = '';
-    }
-  };
-
-  // Handlers de desenho com mouse
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (!isDrawer || e.pointerType === 'touch') return;
-    
-    // Não prevenir o evento padrão se clicar na ferramenta
-    if (toolboxRef.current && toolboxRef.current.contains(e.target as Node)) {
-      return;
-    }
-    
-    e.preventDefault();
-    
-    drawing.current = true;
-    lastPoint.current = null;  // Resetar o último ponto para começar nova linha
-    onStartLine?.();
-    
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    
-    // Desenhar ponto inicial
-    drawPoint(x, y);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDrawer || !drawing.current || e.pointerType === 'touch') return;
-    
-    // Ignorar movimento do mouse sobre a caixa de ferramentas
-    if (toolboxRef.current && toolboxRef.current.contains(e.target as Node)) {
-      return;
-    }
-    
-    e.preventDefault();
-    
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    
-    // Desenhar ponto
-    drawPoint(x, y);
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (!isDrawer || e.pointerType === 'touch') return;
-    
-    // Não prevenir o evento padrão se soltar na ferramenta
-    if (toolboxRef.current && toolboxRef.current.contains(e.target as Node)) {
-      return;
-    }
-    
-    e.preventDefault();
-    
-    drawing.current = false;
-    lastPoint.current = null;  // Resetar último ponto ao terminar a linha
-    onEndLine?.();
-  };
 
   const toggleTools = (e: React.MouseEvent) => {
     // Evitar que o clique no canvas ao mostrar ferramentas inicie um desenho
@@ -506,12 +517,7 @@ const DrawingCanvas: React.FC<Props> = ({
             {/* Botão de limpar */}
             <button
               className="bg-red-500 text-white px-2 py-1 rounded text-xs mt-1"
-              onClick={() => {
-                if (isDrawer) {
-                  console.log('DrawingCanvas: Botão limpar acionado, chamando onClear');
-                  onClear?.();
-                }
-              }}
+              onClick={clearCanvas}
             >
               Limpar
             </button>
@@ -560,9 +566,8 @@ const DrawingCanvas: React.FC<Props> = ({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
+              onPointerCancel={handlePointerUp}
+              touch-action="none"
             />
             
             {/* Ferramentas em modo flutuante */}
