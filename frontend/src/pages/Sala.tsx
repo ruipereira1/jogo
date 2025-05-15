@@ -304,9 +304,14 @@ function Sala() {
       setTimeout(() => setRemovedByTimeout(false), 8000);
     });
 
-    // Adicionar manipulador para desenho por pontos
+    // Receber pontos desenhados de outros jogadores
     socket.on('draw-point', (data) => {
       const { x, y, color, size } = data;
+      // Não desenhar se for o próprio desenhista (já desenhado localmente)
+      if (isDrawer) return;
+      
+      console.log('Recebendo ponto:', x, y, color, size);
+      
       // Desenhar diretamente no canvas
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -320,7 +325,7 @@ function Sala() {
       
       ctx.beginPath();
       ctx.arc(canvasX, canvasY, size/2, 0, Math.PI * 2);
-      ctx.fillStyle = color || strokeColor;
+      ctx.fillStyle = color || '#222';
       ctx.fill();
     });
 
@@ -346,7 +351,7 @@ function Sala() {
       socket.off('removed-by-timeout');
       socket.off('draw-point');
     };
-  }, [roomCode, navigate]);
+  }, [roomCode, navigate, isDrawer]);
 
   // Sincronizar newRounds com maxRounds sempre que maxRounds mudar
   useEffect(() => {
@@ -392,7 +397,21 @@ function Sala() {
   const handleDrawPoint = (point: { x: number; y: number }) => {
     if (!isDrawer) return;
     
-    // Envia o ponto diretamente para o servidor
+    // Desenhar o ponto localmente
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const canvasX = point.x * canvas.width;
+        const canvasY = point.y * canvas.height;
+        ctx.beginPath();
+        ctx.arc(canvasX, canvasY, strokeWidth/2, 0, Math.PI * 2);
+        ctx.fillStyle = strokeColor;
+        ctx.fill();
+      }
+    }
+    
+    // Envia o ponto para o servidor
     const socket = socketService.getSocket();
     socket.emit('draw-point', { 
       roomCode, 

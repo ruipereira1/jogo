@@ -560,13 +560,19 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // Adicionar ponto ao histórico da sala (opcional, se quiser manter histórico)
+    // Debugar informações recebidas
+    console.log('Recebido draw-point:', { roomCode, x, y, color, size });
+    
+    // Adicionar ponto ao histórico da sala (opcional)
     if (room.points) {
       room.points.push({ x, y, color, size });
     }
     
-    // Repassar o ponto para todos os jogadores na sala
-    io.to(roomCode).emit('draw-point', { x, y, color, size });
+    // Repassar o ponto para todos os jogadores na sala EXCETO o remetente
+    socket.to(roomCode).emit('draw-point', { x, y, color, size });
+    
+    // Log para confirmar envio
+    console.log('Ponto enviado para sala:', roomCode);
   });
 });
 

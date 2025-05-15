@@ -112,6 +112,11 @@ const DrawingCanvas: React.FC<Props> = ({
     ctx.arc(canvasX, canvasY, width/2, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
+    
+    // Se for o desenhista, notifica a sala sobre o ponto
+    if (isDrawer) {
+      onDraw?.({ x, y });
+    }
   };
 
   // Limpar o canvas
@@ -142,7 +147,6 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Desenhar ponto inicial
     drawPoint(x, y);
-    onDraw?.({ x, y });
     
     // Desativar temporariamente o scroll da página
     if (containerRef.current) {
@@ -163,7 +167,6 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Desenhar ponto
     drawPoint(x, y);
-    onDraw?.({ x, y });
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -195,7 +198,6 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Desenhar ponto inicial
     drawPoint(x, y);
-    onDraw?.({ x, y });
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -208,7 +210,6 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Desenhar ponto
     drawPoint(x, y);
-    onDraw?.({ x, y });
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
