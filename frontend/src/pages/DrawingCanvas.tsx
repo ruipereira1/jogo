@@ -113,8 +113,9 @@ const DrawingCanvas: React.FC<Props> = ({
     ctx.fillStyle = color;
     ctx.fill();
     
-    // Se for o desenhista, notifica a sala sobre o ponto
+    // Notificar a sala sobre o ponto APENAS se for o desenhista
     if (isDrawer) {
+      console.log('Enviando ponto:', x, y);
       onDraw?.({ x, y });
     }
   };

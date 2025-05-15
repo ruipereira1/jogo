@@ -568,11 +568,12 @@ io.on('connection', (socket) => {
       room.points.push({ x, y, color, size });
     }
     
-    // Repassar o ponto para todos os jogadores na sala EXCETO o remetente
-    socket.to(roomCode).emit('draw-point', { x, y, color, size });
+    // Repassar o ponto para TODOS os jogadores na sala (incluindo o remetente)
+    // Isso permite que o próprio desenhista veja confirmação de seus traços
+    io.to(roomCode).emit('draw-point', { x, y, color, size });
     
     // Log para confirmar envio
-    console.log('Ponto enviado para sala:', roomCode);
+    console.log('Ponto enviado para todos na sala:', roomCode);
   });
 });
 

@@ -307,10 +307,8 @@ function Sala() {
     // Receber pontos desenhados de outros jogadores
     socket.on('draw-point', (data) => {
       const { x, y, color, size } = data;
-      // Não desenhar se for o próprio desenhista (já desenhado localmente)
-      if (isDrawer) return;
       
-      console.log('Recebendo ponto:', x, y, color, size);
+      console.log('Recebendo ponto para desenhar:', x, y, color, size);
       
       // Desenhar diretamente no canvas
       const canvas = canvasRef.current;
@@ -351,7 +349,7 @@ function Sala() {
       socket.off('removed-by-timeout');
       socket.off('draw-point');
     };
-  }, [roomCode, navigate, isDrawer]);
+  }, [roomCode, navigate]);
 
   // Sincronizar newRounds com maxRounds sempre que maxRounds mudar
   useEffect(() => {
@@ -397,19 +395,8 @@ function Sala() {
   const handleDrawPoint = (point: { x: number; y: number }) => {
     if (!isDrawer) return;
     
-    // Desenhar o ponto localmente
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const canvasX = point.x * canvas.width;
-        const canvasY = point.y * canvas.height;
-        ctx.beginPath();
-        ctx.arc(canvasX, canvasY, strokeWidth/2, 0, Math.PI * 2);
-        ctx.fillStyle = strokeColor;
-        ctx.fill();
-      }
-    }
+    // NÃO desenhar localmente - isso será feito pelo socket
+    // O DrawingCanvas já desenha localmente e isso estará duplicando o desenho
     
     // Envia o ponto para o servidor
     const socket = socketService.getSocket();
