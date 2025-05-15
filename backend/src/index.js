@@ -98,6 +98,22 @@ function generateRoomCode() {
 
 // Função para iniciar uma nova ronda
 function startRound(room, io) {
+  // Garantir que haja pelo menos um jogador para evitar erros
+  const onlinePlayers = room.players.filter(p => p.online !== false);
+  if (onlinePlayers.length === 0) {
+    console.error('Erro: Não há jogadores online para iniciar a ronda');
+    return;
+  }
+  
+  // Resetar o controle de jogadores que acertaram
+  room._correctPlayers = [];
+  
+  // Limpar os pontos e linhas armazenados da ronda anterior
+  room.lines = [];
+  if (room.points) {
+    room.points = [];
+  }
+  
   // Countdown antes de começar a ronda
   let countdown = 3;
   io.to(room.id).emit('countdown', { value: countdown, round: room.round, maxRounds: room.maxRounds });
@@ -108,11 +124,26 @@ function startRound(room, io) {
       clearInterval(countdownInterval);
       // Limpar o canvas para todos
       io.to(room.id).emit('clear-canvas');
+      
+      // Enviar também um ponto especial que garante limpeza do canvas
+      io.to(room.id).emit('draw-point', { 
+        x: 0,
+        y: 0,
+        isClearCanvas: true,
+        timestamp: Date.now()
+      });
+      
       // Sorteia o desenhista (evitar repetir o anterior se possível)
-      let possibleDrawers = room.players.map(p => p.id);
+      let possibleDrawers = room.players.filter(p => p.online !== false).map(p => p.id);
       if (room.currentDrawer && room.players.length > 1) {
         possibleDrawers = possibleDrawers.filter(id => id !== room.currentDrawer);
       }
+      
+      // Se não houver possibilidades (todos já foram desenhistas), usar todos novamente
+      if (possibleDrawers.length === 0) {
+        possibleDrawers = room.players.filter(p => p.online !== false).map(p => p.id);
+      }
+      
       const drawerId = possibleDrawers[Math.floor(Math.random() * possibleDrawers.length)];
       const drawer = room.players.find(p => p.id === drawerId);
       if (!drawer) {
@@ -121,12 +152,14 @@ function startRound(room, io) {
         return;
       }
       room.currentDrawer = drawer.id;
+      
       // Sorteia a palavra conforme dificuldade
       let wordList = WORDS_FACIL;
       if (room.difficulty === 'medio') wordList = WORDS_MEDIO;
       if (room.difficulty === 'dificil') wordList = WORDS_DIFICIL;
       const word = wordList[Math.floor(Math.random() * wordList.length)];
       room.currentWord = word;
+      
       // Notifica todos os jogadores
       room.players.forEach(player => {
         if (player.id === drawer.id) {
@@ -135,28 +168,20 @@ function startRound(room, io) {
           io.to(player.id).emit('round-start', { isDrawer: false });
         }
       });
-      // Enviar atualização de jogadores para todos
-      io.to(room.id).emit('players-update', {
-        players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
-          id, playerId, name, score, isHost, online
-        })),
-        drawerId: drawer.id,
-        round: room.round,
-        maxRounds: room.maxRounds
-      });
-      io.to(room.id).emit('game-started');
-      // TEMPORIZADOR DE RONDA
-      let timeLeft = room.timePerRound || 60;
-      room._lastTimeLeft = timeLeft;
-      io.to(room.id).emit('timer-update', { timeLeft });
-      if (room.timerInterval) clearInterval(room.timerInterval);
+      
+      // Configura o temporizador da rodada
+      console.log(`Iniciando rodada ${room.round} de ${room.maxRounds} com desenhista ${drawer.name}`);
+      room.timeLeft = room.timePerRound || 60;
       room.timerInterval = setInterval(() => {
-        timeLeft--;
-        io.to(room.id).emit('timer-update', { timeLeft });
-        if (timeLeft <= 0) {
+        room.timeLeft -= 1;
+        room._lastTimeLeft = room.timeLeft; // Guarda último tempo para reconexões
+        io.to(room.id).emit('timer-update', { timeLeft: room.timeLeft });
+        if (room.timeLeft <= 0) {
           clearInterval(room.timerInterval);
+          console.log(`Rodada ${room.round} terminou por tempo esgotado`);
           io.to(room.id).emit('round-ended', { reason: 'timeout' });
-          nextRoundOrEnd(room, io);
+          // Aguarda alguns segundos e inicia nova ronda
+          setTimeout(() => nextRoundOrEnd(room, io), 5000);
         }
       }, 1000);
     }

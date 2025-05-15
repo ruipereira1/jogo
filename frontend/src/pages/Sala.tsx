@@ -195,6 +195,27 @@ function Sala() {
       setGuesses([]);
       setGuessedCorrectly(false);
       setWinnerName(null);
+      
+      // Limpar o canvas quando começa uma nova rodada
+      setReceivedPoints([]);
+      setLines([]);
+      setPoints([]);
+      
+      // Enviar um evento de limpeza para garantir que todos limpem o canvas
+      if (isDrawer) {
+        socket.emit('clear-canvas', { roomCode });
+        
+        // Enviar também um ponto especial que indica limpeza do canvas
+        socket.emit('draw-point', { 
+          roomCode, 
+          x: 0, 
+          y: 0,
+          isClearCanvas: true,
+          color: strokeColor,
+          size: strokeWidth,
+          timestamp: Date.now()
+        });
+      }
     });
 
     // Receber linhas desenhadas de outros jogadores
