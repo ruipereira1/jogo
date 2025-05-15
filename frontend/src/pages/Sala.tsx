@@ -349,10 +349,22 @@ function Sala() {
 
     // Receber pontos desenhados de outros jogadores
     socket.on('draw-point', (data) => {
-      console.log('SALA recebendo draw-point:', data, 'isDrawer:', isDrawer);
+      console.log('SALA recebendo draw-point:', data);
       
-      // Em vez de tentar desenhar aqui, apenas armazenamos o ponto recebido
-      setReceivedPoints(prev => [...prev, data]);
+      // Apenas espectadores devem processar os pontos recebidos
+      if (isDrawer) return;
+      
+      // Adicionar o ponto ao array de pontos recebidos
+      setReceivedPoints(prev => {
+        // Limitar o número de pontos armazenados para evitar problemas de performance
+        const maxPoints = 1000;
+        const newPoints = [...prev, data];
+        if (newPoints.length > maxPoints) {
+          // Se exceder o limite, manter apenas os mais recentes
+          return newPoints.slice(newPoints.length - maxPoints);
+        }
+        return newPoints;
+      });
     });
 
     setIsLoading(false);

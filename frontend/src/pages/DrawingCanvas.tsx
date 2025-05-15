@@ -4,6 +4,8 @@ interface Point {
   x: number; 
   y: number; 
   pressure?: number;
+  color?: string;
+  size?: number;
 }
 
 interface Props {
@@ -172,11 +174,19 @@ const DrawingCanvas: React.FC<Props> = ({
   useEffect(() => {
     if (isDrawer || !receivedPoints || receivedPoints.length === 0) return;
     
+    console.log(`DrawingCanvas: Processando ${receivedPoints.length} pontos recebidos (espectador)`, receivedPoints);
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    
+    // Limpar o canvas uma vez ao receber novos pontos
+    if (receivedPoints.some(p => p.isStartOfLine)) {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
     
     // Agrupar pontos por clientId 
     const pointsByClient: {[key: string]: Point[]} = {};
@@ -200,11 +210,13 @@ const DrawingCanvas: React.FC<Props> = ({
         pointsByClient[clientId] = [];
       }
       
-      // Adicionar ponto
+      // Adicionar ponto com todas as propriedades necessárias
       pointsByClient[clientId].push({
         x: p.x,
         y: p.y,
-        pressure: p.pressure || 0.5
+        pressure: p.pressure || 0.5,
+        color: p.color || '#222',
+        size: p.size || 3
       });
     });
     
@@ -223,6 +235,10 @@ const DrawingCanvas: React.FC<Props> = ({
         lastClientPointsRef.current[clientId] = points;
       }
     });
+    
+    // Logging detalhado para debug
+    console.log('DrawingCanvas: Processamento de pontos concluído', 
+      Object.entries(pointsByClient).map(([key, pts]) => [key, pts.length]));
   }, [receivedPoints, isDrawer]);
    
   // Limpar o canvas
