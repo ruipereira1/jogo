@@ -165,11 +165,20 @@ const DrawingCanvas: React.FC<Props> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Limpar o canvas uma vez se algum ponto indica início de linha
-    if (receivedPoints.some(p => p.isStartOfLine)) {
+    // Verificar se há um comando explícito de limpeza em vez de limpar automaticamente
+    const hasClearCommand = receivedPoints.some(p => p.isClearCanvas === true);
+    
+    // Só limpar se houver um comando explícito de limpeza
+    if (hasClearCommand) {
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      lastClientPointsRef.current = {}; // Resetar pontos armazenados
+      return; // Se for limpar o canvas, ignorar o resto do processamento
     }
+    
+    // Verificar se há início de nova linha (primeiro ponto após levantar o lápis)
+    // Mas NÃO limpar o canvas, apenas começar uma nova linha de desenho
+    const hasNewLineStart = receivedPoints.some(p => p.isStartOfLine);
     
     // Agrupar pontos por clientId 
     const pointsByClient: {[key: string]: Point[]} = {};

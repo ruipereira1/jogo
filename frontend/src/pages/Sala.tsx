@@ -522,6 +522,17 @@ function Sala() {
     // Enviar evento para o servidor
     socketService.getSocket().emit('clear-canvas', { roomCode });
     
+    // Enviar também um ponto especial que indica limpeza do canvas para garantir que os espectadores limpem
+    socketService.getSocket().emit('draw-point', { 
+      roomCode, 
+      x: 0, 
+      y: 0,
+      isClearCanvas: true, // Propriedade especial que indica que o canvas deve ser limpo
+      color: strokeColor, 
+      size: strokeWidth,
+      timestamp: Date.now()
+    });
+    
     // Resetar flag após um delay maior
     setTimeout(() => {
       clearingRef.current = 0;
