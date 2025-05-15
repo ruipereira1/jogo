@@ -66,7 +66,7 @@ function Sala() {
 
   // Ref para garantir valor atualizado de drawing
   const drawingRef = useRef(false);
-  const clearingRef = useRef(false);
+  const clearingRef = useRef<number>(0);
   const lineStartingRef = useRef(false);
 
   // Detectar tipo de dispositivo para ajustes de UI
@@ -120,19 +120,46 @@ function Sala() {
     // Pedir estado completo da sala ao entrar/reconectar
     socket.emit('request-room-state', { roomCode });
 
-    // Receber estado completo da sala
-    socket.on('room-state', (state) => {
+    // Efeito para processar o estado inicial da sala quando ele é recebido
+    const handleRoomState = (state: any) => {
       setPlayers(state.players || []);
       setDrawerId(state.drawerId || null);
       setRound(state.round || 1);
       setMaxRounds(state.maxRounds || 1);
       setIsGameStarted(state.status === 'playing');
       setWord(state.word || null);
-      setLines(state.lines || []);
+      
+      // Sincronizar linhas e pontos apenas se não for o desenhista atual
+      // porque o desenhista já está desenhando localmente
+      if (state.drawerId !== socket.id) {
+        setLines(state.lines || []);
+        
+        // Limpar e recriar os pontos recebidos
+        setReceivedPoints([]);
+        // Se existem pontos no estado da sala, processá-los depois de um breve delay
+        // para garantir que o canvas está pronto
+        if (state.points && state.points.length > 0) {
+          setTimeout(() => {
+            setReceivedPoints(state.points);
+          }, 100);
+        }
+      }
+      
       setTimer(state.timer || 0);
+      
       if (state.podium) setPodium(state.podium);
       else setPodium(null);
-    });
+      
+      console.log('Estado da sala sincronizado:', 
+        `jogadores=${state.players?.length || 0}`, 
+        `desenhista=${state.drawerId?.substring(0, 5) || 'nenhum'}`,
+        `rodada=${state.round}/${state.maxRounds}`,
+        `linhas=${state.lines?.length || 0}`
+      );
+    };
+
+    // Receber estado completo da sala
+    socket.on('room-state', handleRoomState);
 
     // Ouvir eventos do socket
     socket.on('player-joined', ({ players, playerName }) => {
@@ -281,10 +308,10 @@ function Sala() {
       console.log('Sala: Recebido evento clear-canvas, limpando desenho');
       
       // Flag para evitar loops infinitos
-      const alreadyClearing = clearingRef.current;
+      const alreadyClearing = clearingRef.current > 0;
       if (alreadyClearing) return;
       
-      clearingRef.current = true;
+      clearingRef.current = Date.now();
       
       // Limpar arrays locais
       setLines([]);
@@ -292,7 +319,7 @@ function Sala() {
       
       // Resetar flag após um pequeno delay
       setTimeout(() => {
-        clearingRef.current = false;
+        clearingRef.current = 0;
       }, 100);
     });
 
@@ -477,10 +504,14 @@ function Sala() {
   const handleClearCanvas = () => {
     if (!isDrawer) return;
     
-    // Evitar chamadas duplicadas
-    if (clearingRef.current) return;
-    clearingRef.current = true;
+    // Evitar chamadas duplicadas usando timestamp
+    const now = Date.now();
+    if (clearingRef.current && now - clearingRef.current < 300) {
+      console.log('Ignorando solicitação de limpeza duplicada');
+      return;
+    }
     
+    clearingRef.current = now;
     console.log('Sala: Limpando canvas e enviando evento clear-canvas');
     
     // Limpar arrays locais
@@ -491,10 +522,10 @@ function Sala() {
     // Enviar evento para o servidor
     socketService.getSocket().emit('clear-canvas', { roomCode });
     
-    // Resetar flag após um pequeno delay
+    // Resetar flag após um delay maior
     setTimeout(() => {
-      clearingRef.current = false;
-    }, 100);
+      clearingRef.current = 0;
+    }, 300);
   };
 
   useEffect(() => {

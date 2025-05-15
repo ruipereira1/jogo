@@ -567,23 +567,34 @@ io.on('connection', (socket) => {
       // Verificar se já houve acertos nesta ronda
       if (!room._correctPlayers) room._correctPlayers = [];
       const isFirstCorrect = room._correctPlayers.length === 0;
-      // Adicionar este jogador à lista de quem acertou
+      // Adicionar este jogador à lista de quem acertou (evitando duplicações)
       if (!room._correctPlayers.includes(socket.id)) {
         room._correctPlayers.push(socket.id);
+      } else {
+        // Jogador já acertou antes, não contar novamente
+        console.log(`${userName} já tinha acertado, ignorando nova tentativa`);
+        return;
       }
+      
       // Pontuação para quem acerta: base 20 + bónus pelo tempo + bónus se for o primeiro
       const basePoints = 20;
       const timeBonus = Math.floor(timeLeft * 0.5); // mais rápido, mais pontos
       const firstBonus = isFirstCorrect ? 5 : 0;
       const playerPoints = Math.max(10, Math.min(50, basePoints + timeBonus + firstBonus));
-      // Pontuação para o desenhista: 5 pontos por cada jogador que acertou
-      const drawerPoints = 5 * room._correctPlayers.length;
+      
+      // Pontuação para o desenhista: 5 pontos por cada novo acerto
+      const drawerPoints = 5; // 5 pontos por acerto
+      
       // Jogador que acertou ganha pontos
       const player = room.players.find(p => p.id === socket.id);
       if (player) player.score += playerPoints;
-      // Desenhista ganha pontos
+      
+      // Desenhista ganha pontos (acumulando)
       const drawer = room.players.find(p => p.id === room.currentDrawer);
-      if (drawer) drawer.score = drawerPoints;
+      if (drawer) drawer.score += drawerPoints; // BUG CORRIGIDO: agora soma-se 5 pontos a cada acerto
+      
+      console.log(`${userName} acertou a palavra! (+${playerPoints} pontos) | Desenhista (+${drawerPoints} pontos, total: ${drawer?.score || 0})`);
+      
       // Atualizar todos os jogadores com a nova lista de pontuações
       io.to(roomCode).emit('players-update', {
         players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
@@ -593,13 +604,13 @@ io.on('connection', (socket) => {
         round: room.round,
         maxRounds: room.maxRounds
       });
-      console.log(`${userName} acertou a palavra! (+${playerPoints} pontos) | Desenhista (+${drawerPoints} pontos)`);
+      
       // Se todos os jogadores (exceto o desenhista) já acertaram, termina a ronda
       const totalPlayers = room.players.filter(p => p.id !== room.currentDrawer && p.online !== false).length;
-      if (room._correctPlayers.length >= totalPlayers) {
-      if (room.timerInterval) clearInterval(room.timerInterval);
-      io.to(roomCode).emit('round-ended', { reason: 'guessed' });
-      setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
+      if (totalPlayers > 0 && room._correctPlayers.length >= totalPlayers) {
+        if (room.timerInterval) clearInterval(room.timerInterval);
+        io.to(roomCode).emit('round-ended', { reason: 'guessed' });
+        setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
       }
     }
   });
