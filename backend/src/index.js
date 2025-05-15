@@ -553,37 +553,40 @@ io.on('connection', (socket) => {
 
   // Manipulador para desenho por pontos (conectados em linhas)
   socket.on('draw-point', ({ roomCode, x, y, color, size }) => {
-    if (!roomCode) return;
+    if (!roomCode) {
+      console.log('Erro: roomCode ausente');
+      return;
+    }
+    
     const room = rooms.get(roomCode);
     if (!room) {
       console.log('Sala não encontrada:', roomCode);
       return;
     }
     
-    // Debugar informações recebidas
-    console.log('Recebido draw-point:', { roomCode, x, y, color, size });
-    
-    // Adicionar ponto ao histórico da sala
-    if (!room.points) {
-      room.points = [];
-    }
-    
-    // Adicionar informação sobre o cliente para distinguir diferentes linhas
+    // Dados completos do ponto
     const pointData = { 
       x, 
       y, 
       color, 
       size,
       clientId: socket.id, // Identificar quem está desenhando
-      timestamp: Date.now() // Útil para ordenar ou calcular velocidade
+      timestamp: Date.now()
     };
     
+    console.log(`BACKEND recebeu ponto de ${socket.id} para sala ${roomCode}:`, 
+      { x: x.toFixed(3), y: y.toFixed(3), color, size });
+    
+    // Armazenar o ponto
+    if (!room.points) {
+      room.points = [];
+    }
     room.points.push(pointData);
     
-    // Repassar o ponto para TODOS os jogadores na sala
+    // Enviar para TODOS na sala, INCLUINDO o remetente (para confirmar visualmente)
     io.to(roomCode).emit('draw-point', pointData);
     
-    console.log('Ponto enviado para todos na sala:', roomCode);
+    console.log(`BACKEND enviou ponto para sala ${roomCode}, total jogadores: ${room.players.length}`);
   });
 });
 

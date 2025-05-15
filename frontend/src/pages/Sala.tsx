@@ -309,16 +309,23 @@ function Sala() {
 
     // Receber pontos desenhados de outros jogadores
     socket.on('draw-point', (data) => {
-      const { x, y, color, size, clientId } = data;
+      // Apenas depuração para ver o que está chegando
+      console.log('SALA recebendo draw-point:', data, 'isDrawer:', isDrawer);
       
-      console.log('Recebendo ponto para desenhar:', x, y, color, size);
+      const { x, y, color, size, clientId } = data;
       
       // Desenhar diretamente no canvas
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!canvas) {
+        console.log('Canvas não encontrado');
+        return;
+      }
       
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+      if (!ctx) {
+        console.log('Contexto do canvas não encontrado');
+        return;
+      }
       
       // Coordenadas reais no canvas
       const canvasX = x * canvas.width;
@@ -326,6 +333,7 @@ function Sala() {
       
       // Se for o primeiro ponto deste cliente, apenas desenhe um círculo
       if (!lastPointsByClientRef.current[clientId]) {
+        console.log('Desenhar ponto inicial para', clientId);
         ctx.beginPath();
         ctx.arc(canvasX, canvasY, size/2, 0, Math.PI * 2);
         ctx.fillStyle = color || '#222';
@@ -334,6 +342,7 @@ function Sala() {
         // Desenhar uma linha do último ponto até este
         const lastPoint = lastPointsByClientRef.current[clientId];
         if (lastPoint) {
+          console.log('Desenhar linha para', clientId);
           const lastX = lastPoint.x * canvas.width;
           const lastY = lastPoint.y * canvas.height;
           
@@ -357,8 +366,11 @@ function Sala() {
       }
       
       lastPointTimerRef.current = setTimeout(() => {
-        lastPointsByClientRef.current[clientId] = null;
-      }, 500); // Reset após 500ms sem novos pontos
+        if (clientId && lastPointsByClientRef.current) {
+          console.log('Resetando último ponto para', clientId);
+          lastPointsByClientRef.current[clientId] = null;
+        }
+      }, 500);
     });
 
     setIsLoading(false);
@@ -429,12 +441,9 @@ function Sala() {
   const handleDrawPoint = (point: { x: number; y: number }) => {
     if (!isDrawer) return;
     
-    // NÃO desenhar localmente - isso será feito pelo socket
-    // O DrawingCanvas já desenha localmente e isso estará duplicando o desenho
-    
-    // Envia o ponto para o servidor
-    const socket = socketService.getSocket();
-    socket.emit('draw-point', { 
+    // Enviar o ponto para o servidor
+    console.log('Enviando ponto do desenhista:', point);
+    socketService.getSocket().emit('draw-point', { 
       roomCode, 
       x: point.x, 
       y: point.y, 

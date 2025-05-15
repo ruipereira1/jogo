@@ -99,14 +99,22 @@ const DrawingCanvas: React.FC<Props> = ({
   // Função para desenhar um ponto no canvas - modificada para desenhar linhas
   const drawPoint = (x: number, y: number, color: string = strokeColor || '#222', width: number = strokeWidth || 3) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      console.log('Canvas não encontrado em DrawingCanvas');
+      return;
+    }
     
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      console.log('Contexto 2d não encontrado em DrawingCanvas');
+      return;
+    }
     
     // Coordenadas reais no canvas
     const canvasX = x * canvas.width;
     const canvasY = y * canvas.height;
+    
+    console.log('DrawingCanvas.drawPoint:', { x, y, color, canvasX, canvasY, isDrawer });
     
     // Se for o primeiro ponto de uma linha, apenas armazene-o
     if (!lastPoint.current) {
@@ -140,7 +148,7 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Notificar a sala sobre o ponto APENAS se for o desenhista
     if (isDrawer) {
-      console.log('Enviando ponto:', x, y);
+      console.log('DrawingCanvas enviando ponto:', x, y);
       onDraw?.({ x, y });
     }
   };
