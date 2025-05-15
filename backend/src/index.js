@@ -3,6 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 
+// URL do frontend - atualizar se necessário
 const FRONTEND_URL = 'https://desenharapido.netlify.app';
 
 // Tempo em milissegundos para remover jogadores desconectados
@@ -13,33 +14,59 @@ const ROOM_CLEANUP_INTERVAL = 300000; // 5 minutos
 
 const app = express();
 const server = http.createServer(app);
+
+// Configuração do Socket.IO com CORS ampliado
 const io = new Server(server, {
   cors: {
-    origin: [FRONTEND_URL],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    origin: "*", // Permitir qualquer origem para desenv/debug - em produção seria FRONTEND_URL específico
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Origin", "X-Requested-With", "Content-Type", "Accept", "Authorization"],
     credentials: true
   },
-  pingTimeout: 30000,    // 30 segundos
-  pingInterval: 10000    // 10 segundos
+  pingTimeout: 60000,    // Aumentado para 60 segundos
+  pingInterval: 25000,   // Aumentado para 25 segundos
+  transports: ['websocket', 'polling'] // Garantir uso de websocket e polling como fallback
 });
 
+// Configuração de CORS para o Express
 app.use(cors({
-  origin: [FRONTEND_URL],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  origin: "*", // Permitir qualquer origem para desenv/debug
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Origin", "X-Requested-With", "Content-Type", "Accept", "Authorization"],
   credentials: true
 }));
 
-// Middleware extra para garantir headers CORS em todas as respostas
+// Middleware para garantir cabeçalhos CORS em todas as respostas
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', FRONTEND_URL);
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header("Access-Control-Allow-Origin", "*"); // Permitir qualquer origem
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+  
+  // Tratamento especial para requisições OPTIONS (preflight)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   next();
 });
 
+// Rota de diagnóstico
 app.get('/', (req, res) => {
-  res.send('Servidor ArteRápida rodando!');
+  res.send(`Servidor ArteRápida rodando! CORS configurado para: ${FRONTEND_URL} (e temporariamente *)
+    <br>Socket.IO disponível
+    <br>Salas ativas: ${rooms.size}
+  `);
+});
+
+// Rota de verificação CORS
+app.get('/cors-test', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'CORS configurado corretamente!',
+    origin: req.headers.origin || 'desconhecido',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Armazenamento das salas (em memória, para simplificar)
