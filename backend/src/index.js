@@ -114,6 +114,15 @@ function startRound(room, io) {
     room.points = [];
   }
   
+  // Limpar o canvas para todos ANTES do countdown (1ª limpeza)
+  io.to(room.id).emit('clear-canvas');
+  // Enviar também um comando especial de limpeza via ponto
+  io.to(room.id).emit('draw-point', { 
+    x: 0, y: 0,
+    isClearCanvas: true,
+    timestamp: Date.now()
+  });
+  
   // Countdown antes de começar a ronda
   let countdown = 3;
   io.to(room.id).emit('countdown', { value: countdown, round: room.round, maxRounds: room.maxRounds });
@@ -122,7 +131,8 @@ function startRound(room, io) {
     io.to(room.id).emit('countdown', { value: countdown, round: room.round, maxRounds: room.maxRounds });
     if (countdown <= 0) {
       clearInterval(countdownInterval);
-      // Limpar o canvas para todos
+      
+      // Limpar o canvas para todos DEPOIS do countdown (2ª limpeza)
       io.to(room.id).emit('clear-canvas');
       
       // Enviar também um ponto especial que garante limpeza do canvas
@@ -761,7 +771,7 @@ io.on('connection', (socket) => {
   });
 
   // Manipulador para desenho por pontos (conectados em linhas)
-  socket.on('draw-point', ({ roomCode, x, y, color, size, isStartOfLine, pressure }) => {
+  socket.on('draw-point', ({ roomCode, x, y, color, size, isStartOfLine, pressure, isClearCanvas }) => {
     if (!roomCode) {
       console.log('Erro: roomCode ausente');
       return;
@@ -770,6 +780,26 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room) {
       console.log('Sala não encontrada:', roomCode);
+      return;
+    }
+    
+    // Tratar comando de limpeza especial
+    if (isClearCanvas) {
+      console.log(`Recebido comando para limpar canvas da sala ${roomCode}`);
+      
+      // Limpar pontos armazenados
+      if (room.points) {
+        room.points = [];
+      }
+      
+      // Enviar comando de limpeza para todos na sala
+      io.to(roomCode).emit('draw-point', { 
+        x, y, color, size,
+        isClearCanvas: true,
+        clientId: socket.id,
+        timestamp: Date.now()
+      });
+      
       return;
     }
     
@@ -785,13 +815,17 @@ io.on('connection', (socket) => {
       timestamp: Date.now()
     };
     
-    console.log(`BACKEND recebeu ponto de ${socket.id} para sala ${roomCode}`);
-    
     // Armazenar o ponto
     if (!room.points) {
       room.points = [];
     }
+    
+    // Limitar número de pontos para evitar problemas de memória (manter apenas os últimos 1000)
+    const MAX_POINTS = 1000;
     room.points.push(pointData);
+    if (room.points.length > MAX_POINTS) {
+      room.points = room.points.slice(-MAX_POINTS);
+    }
     
     // Enviar para TODOS na sala, INCLUINDO o remetente (para confirmar visualmente)
     io.to(roomCode).emit('draw-point', pointData);

@@ -196,13 +196,15 @@ function Sala() {
       setGuessedCorrectly(false);
       setWinnerName(null);
       
-      // Limpar o canvas quando começa uma nova rodada
+      // Limpar o canvas quando começa uma nova rodada (para TODOS os jogadores)
       setReceivedPoints([]);
       setLines([]);
       setPoints([]);
       
-      // Enviar um evento de limpeza para garantir que todos limpem o canvas
+      // Abordagem diferente: enviar evento para limpar canvas apenas para o desenhista novo
+      // Os não-desenhistas já terão limpado o canvas com os eventos do servidor
       if (isDrawer) {
+        // Enviar eventos de limpeza apenas se for o desenhista atual
         socket.emit('clear-canvas', { roomCode });
         
         // Enviar também um ponto especial que indica limpeza do canvas
