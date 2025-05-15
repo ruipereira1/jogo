@@ -5,6 +5,12 @@ import cors from 'cors';
 
 const FRONTEND_URL = 'https://desenharapido.netlify.app';
 
+// Tempo em milissegundos para remover jogadores desconectados
+const PLAYER_TIMEOUT = 120000; // 2 minutos  
+
+// Tempo em milissegundos para verificar e limpar salas vazias
+const ROOM_CLEANUP_INTERVAL = 300000; // 5 minutos
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -149,6 +155,34 @@ function nextRoundOrEnd(room, io) {
   }
 }
 
+// Função para limpar salas vazias ou inativas
+function cleanupRooms() {
+  console.log(`Iniciando limpeza de salas vazias. Total de salas: ${rooms.size}`);
+  let roomsRemoved = 0;
+  
+  for (const [code, room] of rooms.entries()) {
+    // Verificar se a sala está vazia (não tem jogadores ou todos estão offline)
+    const hasActivePlayers = room.players.some(p => p.online !== false);
+    
+    // Verificar se a sala está inativa há muito tempo
+    const isInactive = room.status === 'waiting' && 
+                      room.lastActivity && 
+                      (Date.now() - room.lastActivity > 3600000); // 1 hora sem atividade
+    
+    if (!hasActivePlayers || isInactive) {
+      console.log(`Removendo sala ${code}: ${!hasActivePlayers ? 'sem jogadores online' : 'inativa'}`);
+      rooms.delete(code);
+      pendingPointsByRoom.delete(code);
+      roomsRemoved++;
+    }
+  }
+  
+  console.log(`Limpeza concluída. ${roomsRemoved} salas removidas. Restantes: ${rooms.size}`);
+}
+
+// Iniciar o limpador de salas a cada intervalo definido
+setInterval(cleanupRooms, ROOM_CLEANUP_INTERVAL);
+
 io.on('connection', (socket) => {
   console.log('Novo usuário conectado:', socket.id);
 
@@ -176,7 +210,8 @@ io.on('connection', (socket) => {
         lines: [], // Guardar linhas desenhadas
         points: [], // Adicionado para armazenar pontos individuais
         guessedPlayers: [],
-        wordOptions: []
+        wordOptions: [],
+        lastActivity: Date.now()
       });
       // Associar o socket à sala
       socket.join(roomCode);
@@ -199,6 +234,9 @@ io.on('connection', (socket) => {
       if (!room) {
         return callback({ success: false, error: 'Sala não encontrada' });
       }
+      
+      // Registrar atividade na sala
+      room.lastActivity = Date.now();
 
       // Verificar se já existe jogador com este playerId
       let existingPlayer = null;
@@ -312,6 +350,10 @@ io.on('connection', (socket) => {
 
       if (roomCode && rooms.has(roomCode)) {
         const room = rooms.get(roomCode);
+        
+        // Registrar atividade na sala
+        room.lastActivity = Date.now();
+        
         // Encontrar jogador pelo playerId
         const player = room.players.find(p => p.playerId === playerId);
         if (player) {
@@ -353,13 +395,19 @@ io.on('connection', (socket) => {
             // Notificar o jogador removido, se possível
             io.to(player.id).emit('removed-by-timeout');
             console.log(`${userName || socket.id} removido da sala ${roomCode} por timeout de reconexão`);
-            // Se não sobrou ninguém, deletar a sala
-            if (room.players.length === 0) {
+            
+            // Contar jogadores online restantes
+            const onlinePlayers = room.players.filter(p => p.online !== false);
+            
+            // Se não sobrou ninguém online, deletar a sala
+            if (onlinePlayers.length === 0) {
+              console.log(`Nenhum jogador online restante na sala ${roomCode}. Eliminando a sala.`);
               rooms.delete(roomCode);
               pendingPointsByRoom.delete(roomCode); // Limpa buffer de pontos pendentes
-              console.log(`Sala ${roomCode} deletada pois ficou vazia`);
+              console.log(`Sala ${roomCode} deletada pois ficou sem jogadores online`);
               return;
             }
+            
             // Se o host saiu, passar o controle para outro jogador
             if (room.host === socket.id) {
               room.host = room.players[0].id;
@@ -401,6 +449,10 @@ io.on('connection', (socket) => {
     if (!roomCode) return;
     const room = rooms.get(roomCode);
     if (!room) return;
+    
+    // Registrar atividade na sala
+    room.lastActivity = Date.now();
+    
     room.status = 'playing';
     room.round = 1;
     room.id = roomCode; // garantir que room tem id
@@ -497,6 +549,10 @@ io.on('connection', (socket) => {
     if (!roomCode || !text) return;
     const room = rooms.get(roomCode);
     if (!room || room.status !== 'playing') return;
+    
+    // Registrar atividade na sala
+    room.lastActivity = Date.now();
+    
     const userName = socket.data.userName;
     const isCorrect = text.trim().toLowerCase() === (room.currentWord || '').toLowerCase();
     io.to(roomCode).emit('guess', {
