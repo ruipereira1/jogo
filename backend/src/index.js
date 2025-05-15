@@ -551,7 +551,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Novo manipulador para desenho por pontos
+  // Manipulador para desenho por pontos (conectados em linhas)
   socket.on('draw-point', ({ roomCode, x, y, color, size }) => {
     if (!roomCode) return;
     const room = rooms.get(roomCode);
@@ -563,16 +563,26 @@ io.on('connection', (socket) => {
     // Debugar informações recebidas
     console.log('Recebido draw-point:', { roomCode, x, y, color, size });
     
-    // Adicionar ponto ao histórico da sala (opcional)
-    if (room.points) {
-      room.points.push({ x, y, color, size });
+    // Adicionar ponto ao histórico da sala
+    if (!room.points) {
+      room.points = [];
     }
     
-    // Repassar o ponto para TODOS os jogadores na sala (incluindo o remetente)
-    // Isso permite que o próprio desenhista veja confirmação de seus traços
-    io.to(roomCode).emit('draw-point', { x, y, color, size });
+    // Adicionar informação sobre o cliente para distinguir diferentes linhas
+    const pointData = { 
+      x, 
+      y, 
+      color, 
+      size,
+      clientId: socket.id, // Identificar quem está desenhando
+      timestamp: Date.now() // Útil para ordenar ou calcular velocidade
+    };
     
-    // Log para confirmar envio
+    room.points.push(pointData);
+    
+    // Repassar o ponto para TODOS os jogadores na sala
+    io.to(roomCode).emit('draw-point', pointData);
+    
     console.log('Ponto enviado para todos na sala:', roomCode);
   });
 });

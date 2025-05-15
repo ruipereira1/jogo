@@ -32,6 +32,7 @@ const DrawingCanvas: React.FC<Props> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const toolboxRef = useRef<HTMLDivElement | null>(null);
   const drawing = useRef(false);
+  const lastPoint = useRef<Point | null>(null);
   const [showTools, setShowTools] = useState(false);
   const [isMobileDevice, setIsMobileDevice] = useState(false);
   const [touchActive, setTouchActive] = useState(false);
@@ -95,7 +96,7 @@ const DrawingCanvas: React.FC<Props> = ({
     };
   }, [isDrawer]);
 
-  // Função para desenhar um ponto no canvas
+  // Função para desenhar um ponto no canvas - modificada para desenhar linhas
   const drawPoint = (x: number, y: number, color: string = strokeColor || '#222', width: number = strokeWidth || 3) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -107,11 +108,35 @@ const DrawingCanvas: React.FC<Props> = ({
     const canvasX = x * canvas.width;
     const canvasY = y * canvas.height;
     
-    // Desenha um círculo (ponto) na posição
-    ctx.beginPath();
-    ctx.arc(canvasX, canvasY, width/2, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
+    // Se for o primeiro ponto de uma linha, apenas armazene-o
+    if (!lastPoint.current) {
+      // Para ponto individual, desenhe um círculo
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, width/2, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    } else {
+      // Desenha uma linha do último ponto até este
+      ctx.beginPath();
+      
+      // Ponto anterior
+      const prevX = lastPoint.current.x * canvas.width;
+      const prevY = lastPoint.current.y * canvas.height;
+      
+      // Configurar estilo da linha
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      // Desenhar a linha
+      ctx.moveTo(prevX, prevY);
+      ctx.lineTo(canvasX, canvasY);
+      ctx.stroke();
+    }
+    
+    // Atualizar último ponto
+    lastPoint.current = { x, y };
     
     // Notificar a sala sobre o ponto APENAS se for o desenhista
     if (isDrawer) {
@@ -129,6 +154,7 @@ const DrawingCanvas: React.FC<Props> = ({
     if (!ctx) return;
     
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    lastPoint.current = null;  // Resetar o último ponto
     onClear?.();
   };
 
@@ -144,6 +170,7 @@ const DrawingCanvas: React.FC<Props> = ({
     
     drawing.current = true;
     setTouchActive(true);
+    lastPoint.current = null;  // Resetar o último ponto para começar nova linha
     onStartLine?.();
     
     // Desenhar ponto inicial
@@ -176,6 +203,7 @@ const DrawingCanvas: React.FC<Props> = ({
     
     drawing.current = false;
     setTouchActive(false);
+    lastPoint.current = null;  // Resetar último ponto ao terminar a linha
     onEndLine?.();
     
     // Reativar o scroll da página
@@ -191,6 +219,7 @@ const DrawingCanvas: React.FC<Props> = ({
     e.preventDefault();
     
     drawing.current = true;
+    lastPoint.current = null;  // Resetar o último ponto para começar nova linha
     onStartLine?.();
     
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -218,6 +247,7 @@ const DrawingCanvas: React.FC<Props> = ({
     e.preventDefault();
     
     drawing.current = false;
+    lastPoint.current = null;  // Resetar último ponto ao terminar a linha
     onEndLine?.();
   };
 

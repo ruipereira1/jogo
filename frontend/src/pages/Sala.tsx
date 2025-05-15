@@ -101,6 +101,9 @@ function Sala() {
     canvasHeight = 350;
   }
 
+  const lastPointsByClientRef = useRef<{[key: string]: {x: number, y: number} | null}>({});
+  const lastPointTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     const socket = socketService.getSocket();
     const user = socketService.getUser();
@@ -306,7 +309,7 @@ function Sala() {
 
     // Receber pontos desenhados de outros jogadores
     socket.on('draw-point', (data) => {
-      const { x, y, color, size } = data;
+      const { x, y, color, size, clientId } = data;
       
       console.log('Recebendo ponto para desenhar:', x, y, color, size);
       
@@ -317,14 +320,45 @@ function Sala() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       
-      // Desenhar o ponto recebido
+      // Coordenadas reais no canvas
       const canvasX = x * canvas.width;
       const canvasY = y * canvas.height;
       
-      ctx.beginPath();
-      ctx.arc(canvasX, canvasY, size/2, 0, Math.PI * 2);
-      ctx.fillStyle = color || '#222';
-      ctx.fill();
+      // Se for o primeiro ponto deste cliente, apenas desenhe um círculo
+      if (!lastPointsByClientRef.current[clientId]) {
+        ctx.beginPath();
+        ctx.arc(canvasX, canvasY, size/2, 0, Math.PI * 2);
+        ctx.fillStyle = color || '#222';
+        ctx.fill();
+      } else {
+        // Desenhar uma linha do último ponto até este
+        const lastPoint = lastPointsByClientRef.current[clientId];
+        if (lastPoint) {
+          const lastX = lastPoint.x * canvas.width;
+          const lastY = lastPoint.y * canvas.height;
+          
+          ctx.beginPath();
+          ctx.moveTo(lastX, lastY);
+          ctx.lineTo(canvasX, canvasY);
+          ctx.strokeStyle = color || '#222';
+          ctx.lineWidth = size || 3;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        }
+      }
+      
+      // Armazenar este ponto como último para este cliente
+      lastPointsByClientRef.current[clientId] = { x, y };
+      
+      // Resetar o ponto quando o cliente parar de desenhar (com delay)
+      if (lastPointTimerRef.current) {
+        clearTimeout(lastPointTimerRef.current);
+      }
+      
+      lastPointTimerRef.current = setTimeout(() => {
+        lastPointsByClientRef.current[clientId] = null;
+      }, 500); // Reset após 500ms sem novos pontos
     });
 
     setIsLoading(false);
