@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socketService from '../services/socket';
 import QRCode from 'react-qr-code';
@@ -10,6 +10,15 @@ interface Player {
   score: number;
   isHost: boolean;
   online?: boolean;
+}
+
+// Declare interface para window global
+declare global {
+  interface Window {
+    globalPlayers?: any[];
+    currentPlayers?: any[];
+    forceShowPodium?: () => string;
+  }
 }
 
 function Sala() {
@@ -59,10 +68,11 @@ function Sala() {
   const [strokeWidth, setStrokeWidth] = useState(3);
   // Ref para debouncing do envio de pontos
   const lastSentRef = useRef<number>(0);
-  const pointQueueRef = useRef<{x: number, y: number}[]>([]);
+  const pointQueueRef = useRef<{x: number, y: number, pressure?: number, isStartOfLine?: boolean, isSinglePoint?: boolean}[]>([]);
   const [isHost, setIsHost] = useState(false);
   const [points, setPoints] = useState<Array<{x: number, y: number, color?: string, width?: number}>>([]);
   const [receivedPoints, setReceivedPoints] = useState<any[]>([]);
+  const lastStateRequestRef = useRef<number>(0); // Novo ref para throttling de solicitações de estado
 
   // Ref para garantir valor atualizado de drawing
   const drawingRef = useRef(false);
@@ -86,7 +96,11 @@ function Sala() {
     
     handleResize();
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
   }, []);
 
   let canvasWidth, canvasHeight;
@@ -107,6 +121,35 @@ function Sala() {
   const lastPointsByClientRef = useRef<{[key: string]: {x: number, y: number} | null}>({});
   const lastPointTimerRef = useRef<number | null>(null);
 
+  // Função para enviar lotes de pontos com throttling
+  const sendPointsBatch = useCallback(() => {
+    if (pointQueueRef.current.length === 0) return;
+    
+    // Enviar todos os pontos acumulados de uma vez
+    console.log(`Enviando lote de ${pointQueueRef.current.length} pontos ao servidor`);
+    socketService.getSocket().emit('draw-points-batch', { 
+      roomCode, 
+      points: pointQueueRef.current,
+      color: strokeColor,
+      size: strokeWidth,
+      timestamp: Date.now()
+    });
+    
+    pointQueueRef.current = []; // Limpar fila após envio
+  }, [roomCode, strokeColor, strokeWidth]);
+
+  // Função throttled para solicitar estado da sala
+  const requestRoomStateThrottled = useCallback(() => {
+    const now = Date.now();
+    if (now - lastStateRequestRef.current > 3000) { // Limitar a 1 solicitação a cada 3 segundos
+      console.log('Solicitando estado da sala (throttled)');
+      lastStateRequestRef.current = now;
+      socketService.getSocket().emit('request-room-state', { roomCode });
+    } else {
+      console.log('Solicitação de estado ignorada (throttling)');
+    }
+  }, [roomCode]);
+
   useEffect(() => {
     const socket = socketService.getSocket();
     const user = socketService.getUser();
@@ -117,20 +160,85 @@ function Sala() {
       return;
     }
 
-    // Pedir estado completo da sala ao entrar/reconectar
-    socket.emit('request-room-state', { roomCode });
+    // Verificar se estamos em um ambiente com suporte adequado para canvas
+    const canvas = document.createElement('canvas');
+    const hasCanvasSupport = !!(canvas.getContext && canvas.getContext('2d'));
+    if (!hasCanvasSupport) {
+      console.error('Este navegador não suporta canvas HTML5!');
+      setError('Este navegador não suporta desenho. Por favor, use um navegador mais recente.');
+      return;
+    }
+
+    // Pedir estado completo da sala ao entrar/reconectar (usando throttling)
+    requestRoomStateThrottled();
 
     // Efeito para processar o estado inicial da sala quando ele é recebido
     const handleRoomState = (state: any) => {
+      console.log('[ESTADO] Estado da sala recebido:', state);
       setPlayers(state.players || []);
       setDrawerId(state.drawerId || null);
-      setRound(state.round || 1);
-      setMaxRounds(state.maxRounds || 1);
-      setIsGameStarted(state.status === 'playing');
-      setWord(state.word || null);
+
+      // Garantir que round e maxRounds sejam números válidos
+      const currentRound = Number(state.round) || 1;
+      const totalRounds = Number(state.maxRounds) || 3;
+
+      console.log(`[ESTADO] Atualizando rodada: ${currentRound}/${totalRounds}`);
+      
+      // Verificar se o valor de maxRounds é consistente
+      if (maxRounds !== totalRounds && totalRounds > 0) {
+        console.log(`[CORREÇÃO] Atualizando máximo de rodadas: ${maxRounds} -> ${totalRounds}`);
+        setMaxRounds(totalRounds);
+      }
+      
+      // Verificar inconsistências em round
+      if (currentRound > totalRounds) {
+        console.log(`[ALERTA] Rodada atual (${currentRound}) maior que o máximo (${totalRounds})`);
+        
+        // Se o jogo ainda está ativo mas a rodada excedeu o máximo, talvez devamos mostrar o pódio
+        if (state.status === 'playing' && podium === null) {
+          console.log('[CORREÇÃO] Rodada excedeu o máximo, mas pódio não está visível');
+          // Dar um tempo para o servidor enviar o pódio
+          setTimeout(() => {
+            if (podium === null && isGameStarted) {
+              console.log('[CORREÇÃO] Forçando exibição do pódio devido a inconsistência de rodada');
+              const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+              setPodium(sortedPlayers);
+              setIsGameStarted(false);
+            }
+          }, 2000);
+        }
+      } else {
+        // Definir a rodada apenas se for um valor válido
+        setRound(currentRound);
+      }
+      
+      // Se o estado inclui um pódio, mostrar isso
+      if (state.status === 'gameEnded' || state.podium) {
+        console.log('[ESTADO] Jogo encerrado detectado no estado');
+        const sortedPlayers = [...(state.podium || state.players || [])].sort((a, b) => b.score - a.score);
+        setPodium(sortedPlayers);
+        setIsGameStarted(false);
+      } else {
+        setIsGameStarted(state.status === 'playing');
+        // Remover pódio se o jogo estiver em andamento
+        if (state.status === 'playing' && podium !== null) {
+          console.log('[CORREÇÃO] Removendo pódio durante jogo ativo');
+          setPodium(null);
+        }
+      }
+      
+      // Atualizar palavra apenas se for o desenhista
+      if (state.drawerId === socket.id) {
+        setIsDrawer(true);
+        setWord(state.word || null);
+        console.log('[ESTADO] Definido como desenhista com palavra:', state.word);
+      } else {
+        setIsDrawer(false);
+        setWord(null);
+        console.log('[ESTADO] Definido como não-desenhista');
+      }
       
       // Sincronizar linhas e pontos apenas se não for o desenhista atual
-      // porque o desenhista já está desenhando localmente
       if (state.drawerId !== socket.id) {
         setLines(state.lines || []);
         
@@ -147,14 +255,19 @@ function Sala() {
       
       setTimer(state.timer || 0);
       
-      if (state.podium) setPodium(state.podium);
-      else setPodium(null);
+      // Verificar estado do pódio
+      if (state.podium) {
+        console.log('[ESTADO] Definindo pódio a partir do estado da sala');
+        setPodium(state.podium);
+      }
       
-      console.log('Estado da sala sincronizado:', 
-        `jogadores=${state.players?.length || 0}`, 
+      // Log completo do estado processado
+      console.log('[DIAGNÓSTICO] Estado da sala processado:',
+        `jogadores=${state.players?.length || 0}`,
         `desenhista=${state.drawerId?.substring(0, 5) || 'nenhum'}`,
-        `rodada=${state.round}/${state.maxRounds}`,
-        `linhas=${state.lines?.length || 0}`
+        `rodada=${currentRound}/${totalRounds}`,
+        `status=${state.status}`,
+        `pódio=${state.podium ? 'sim' : 'não'}`
       );
     };
 
@@ -166,30 +279,81 @@ function Sala() {
       setPlayers(players);
       setLastJoined(playerName);
       setTimeout(() => setLastJoined(null), 3000);
-      // Garantir sincronização total:
-      socket.emit('request-room-state', { roomCode });
+      // Garantir sincronização total (com throttling):
+      requestRoomStateThrottled();
     });
 
     socket.on('player-left', ({ players, playerName }) => {
       setPlayers(players);
       setLastLeft(playerName);
       setTimeout(() => setLastLeft(null), 3000);
-      // Pedir estado completo da sala para garantir sincronização
-      socket.emit('request-room-state', { roomCode });
+      // Pedir estado completo da sala para garantir sincronização (com throttling)
+      requestRoomStateThrottled();
     });
 
     socket.on('players-update', ({ players, drawerId, round, maxRounds }) => {
       setPlayers(players);
       setDrawerId(drawerId);
-      setRound(round);
-      if (maxRounds) setMaxRounds(maxRounds);
+      
+      // Garantir que round e maxRounds sejam números válidos
+      if (round !== undefined) {
+        const roundNumber = Number(round);
+        console.log(`[PLAYERS-UPDATE] Atualizando rodada para ${roundNumber}`);
+        
+        // Verificar se não há inconsistência 
+        if (roundNumber <= maxRounds || (maxRounds === undefined)) {
+          setRound(roundNumber);
+        } else {
+          console.log(`[ALERTA] Ignorando atualização inconsistente de rodada: ${roundNumber}/${maxRounds}`);
+        }
+      }
+      
+      if (maxRounds !== undefined) {
+        const maxRoundsNumber = Number(maxRounds);
+        console.log(`[PLAYERS-UPDATE] Atualizando total de rodadas para ${maxRoundsNumber}`);
+        setMaxRounds(maxRoundsNumber);
+      }
+      
+      // Verificar explicitamente fim de jogo se estivermos além da última rodada
+      // VERIFICAÇÃO ESTRITA: Pódio só deve ser exibido se a rodada > máximo
+      if (round > maxRounds && isGameStarted) {
+        console.log('[CORREÇÃO] Rodada excedeu máximo - isso indica fim de jogo');
+        // Calcular o pódio localmente
+        const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+        setPodium(sortedPlayers);
+        setIsGameStarted(false);
+      }
     });
 
     socket.on('game-started', () => {
       setIsGameStarted(true);
+      console.log('Jogo iniciado!');
+      // Garantir que o estado seja atualizado imediatamente
+      setTimeout(() => {
+        console.log('Verificando estado do jogo após início:', {isGameStarted: true});
+        // Forçar atualização da tela
+        setIsGameStarted(prevState => prevState);
+      }, 100);
+
+      // Verificar se o evento round-start vai ser chamado ou se precisamos fazer a transição manualmente
+      setTimeout(() => {
+        // Se após 3 segundos o desenhista ainda não foi definido, solicitar o estado da sala novamente
+        if (!isDrawer && !drawerId) {
+          console.log('Timeout: Solicitando estado da sala após iniciar jogo');
+          requestRoomStateThrottled();
+        }
+      }, 3000);
     });
 
     socket.on('round-start', ({ isDrawer, word }) => {
+      console.log('[ROUND START] Iniciando rodada', round, 'de', maxRounds);
+      
+      // Verificar e corrigir inconsistências
+      if (podium !== null) {
+        console.log('[CORREÇÃO] Removendo pódio exibido incorretamente durante jogo ativo');
+        setPodium(null);
+      }
+      
       setIsDrawer(isDrawer);
       setWord(isDrawer ? word : null);
       setGuesses([]);
@@ -297,7 +461,7 @@ function Sala() {
         
         // Se estamos na última rodada e alguém acertou, terminar o jogo após mostrar o vencedor
         console.log(`Acerto na rodada ${round} de ${maxRounds}`);
-        if (round >= maxRounds) {
+        if (round >= maxRounds) {  
           console.log('Última rodada com acerto! Preparando para encerrar o jogo...');
           
           // Aguardar alguns segundos para mostrar quem acertou antes de exibir o pódio
@@ -314,7 +478,9 @@ function Sala() {
             
             // Ainda assim, notificar o servidor sobre o fim do jogo
             // para garantir a sincronização entre todos os jogadores
-            socketService.getSocket().emit('end-game', { roomCode });
+            socketService.endGame(roomCode).catch(error => {
+              console.error('Erro ao encerrar jogo:', error);
+            });
           }, 3000);
         }
       }
@@ -347,26 +513,109 @@ function Sala() {
     });
 
     socket.on('timer-update', ({ timeLeft }) => {
+      console.log('Timer atualizado:', timeLeft);
       setTimer(timeLeft);
+      
+      // Se o timer começou mas não temos desenhista, solicitar estado da sala
+      if (timeLeft > 0 && !drawerId) {
+        console.log('Timer ativo mas sem desenhista definido, solicitando estado');
+        requestRoomStateThrottled();
+      }
+      
+      // Verificar se a rodada está prestes a terminar
+      if (timeLeft <= 3 && timeLeft > 0 && round >= maxRounds) {
+        console.log('ALERTA: Última rodada prestes a terminar!');
+      }
     });
 
     socket.on('round-ended', ({ reason }) => {
       if (reason === 'timeout') {
         setRoundEnded(true);
-        setTimeout(() => setRoundEnded(false), 4000); // Esconde a mensagem após 4 segundos
+        
+        console.log(`[ROUND ENDED] Rodada ${round} de ${maxRounds} terminou por timeout`);
+        
+        // Verificar se era a última rodada - comparação ESTRITA
+        if (round === maxRounds) {
+          console.log('[ÚLTIMA RODADA] Última rodada terminou por timeout! Encerrando jogo...');
+          
+          // Após mostrar a mensagem de tempo esgotado, mostrar o pódio final
+          setTimeout(() => {
+            // Calcular o pódio localmente
+            const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+            console.log('[PÓDIO] Exibindo pódio final após timeout na última rodada', sortedPlayers);
+            
+            // Forcefully show podium APENAS se realmente for a última rodada
+            setPodium(sortedPlayers);
+            setRoundEnded(false);
+            setIsGameStarted(false);
+            
+            // Notificar o servidor sobre o fim do jogo para sincronização
+            if (isCurrentUserHost) {
+              console.log('[HOST] Host solicitando encerramento de jogo após última rodada');
+              socketService.endGame(roomCode).catch(error => {
+                console.error('Erro ao encerrar jogo:', error);
+              });
+            }
+          }, 4000); // Mostrar após a mensagem de tempo esgotado
+        } else {
+          // Para rodadas não-finais, apenas esconder a mensagem
+          console.log(`[RODADA NORMAL] Rodada ${round} terminou, mas não é a última (${maxRounds})`);
+          setTimeout(() => setRoundEnded(false), 4000); // Esconde a mensagem após 4 segundos
+        }
       }
     });
 
     socket.on('countdown', ({ value, round: countdownRound, maxRounds: countdownMaxRounds }) => {
       setCountdown(value > 0 ? value : null);
-      setIsLastRoundCountdown(countdownRound === countdownMaxRounds && value > 0 && value <= 3);
+      // Verificar se estamos na última rodada (countdownRound é a rodada que vai começar)
+      const isLastRound = countdownRound === countdownMaxRounds;
+      console.log(`Contagem regressiva: ${value}, rodada: ${countdownRound}/${countdownMaxRounds}, última rodada: ${isLastRound}`);
+      
+      setIsLastRoundCountdown(isLastRound && value > 0);
+      
+      // Se estamos entrando na última rodada, exibir mensagem especial
+      if (isLastRound && value === 3) {
+        console.log('Iniciando última rodada!');
+      }
     });
 
-    socket.on('game-ended', ({ players }) => {
-      setPlayers(players || []);
+    socket.on('game-ended', ({ players: receivedPlayers }) => {
+      console.log('[FIM DO JOGO] Evento game-ended recebido com jogadores:', receivedPlayers?.length || 0);
+      
+      // Garantir que temos jogadores válidos
+      let finalPlayers = receivedPlayers;
+      if (!finalPlayers || finalPlayers.length === 0) {
+        console.error('[ERRO] Evento game-ended sem jogadores válidos');
+        // Tentar usar os jogadores atuais
+        finalPlayers = window.globalPlayers || window.currentPlayers || players || [];
+      }
+      
+      // Salvar jogadores globalmente para debug/recuperação
+      window.globalPlayers = finalPlayers;
+      
+      // Definir os jogadores no estado
+      setPlayers(finalPlayers || []);
+      
       // Ordenar por pontuação decrescente
-      const sorted = [...(players || [])].sort((a, b) => b.score - a.score);
+      const sorted = [...(finalPlayers || [])].sort((a, b) => b.score - a.score);
+      console.log('[FIM DO JOGO] Pódio final:', sorted.map(p => `${p.name}: ${p.score}`).join(', '));
+      
+      // Forcefully set podium and clear game state
       setPodium(sorted);
+      setRoundEnded(false);
+      setIsGameStarted(false);
+      setTimer(0);
+      setCountdown(null);
+      setWord(null);
+      setIsDrawer(false);
+      
+      // Adicionar uma verificação extra em caso de falha na exibição do pódio
+      setTimeout(() => {
+        if (podium === null) {
+          console.log('[CORREÇÃO] Aplicando correção para exibir pódio que não foi mostrado');
+          setPodium(sorted);
+        }
+      }, 1000);
     });
 
     socket.on('game-restarted', () => {
@@ -398,7 +647,31 @@ function Sala() {
       setTimeout(() => setRemovedByTimeout(false), 8000);
     });
 
-    // Receber pontos desenhados de outros jogadores
+    // Adicionar suporte para receber lotes de pontos
+    socket.on('draw-points-batch', (data) => {
+      if (isDrawer) return; // O desenhista não precisa processar pontos que ele mesmo enviou
+      
+      console.log(`Recebido lote de ${data.points?.length || 0} pontos`);
+      
+      // Adicionar os pontos ao array de pontos recebidos
+      setReceivedPoints(prev => {
+        // Limitar o número de pontos armazenados para evitar problemas de performance
+        const maxPoints = 2000;
+        const newPoints = [...prev, ...data.points.map((p: {x: number, y: number, pressure?: number, isStartOfLine?: boolean, isSinglePoint?: boolean}) => ({
+          ...p,
+          color: data.color,
+          size: data.size
+        }))];
+        
+        if (newPoints.length > maxPoints) {
+          // Se exceder o limite, manter apenas os mais recentes
+          return newPoints.slice(newPoints.length - maxPoints);
+        }
+        return newPoints;
+      });
+    });
+
+    // Atualizar o ouvinte original de draw-point para ser compatível com o batching
     socket.on('draw-point', (data) => {
       console.log('SALA recebendo draw-point:', data);
       
@@ -420,6 +693,15 @@ function Sala() {
 
     setIsLoading(false);
 
+    // Configurar intervalo para enviar lotes de pontos se for o desenhista
+    // Desativado temporariamente até o servidor suportar batching
+    /*
+    let batchInterval: ReturnType<typeof setInterval> | null = null;
+    if (isDrawer) {
+      batchInterval = setInterval(sendPointsBatch, 100); // Enviar lotes a cada 100ms
+    }
+    */
+
     return () => {
       // Limpar listeners ao sair
       socket.off('player-joined');
@@ -439,8 +721,12 @@ function Sala() {
       socket.off('host-left');
       socket.off('removed-by-timeout');
       socket.off('draw-point');
+      socket.off('draw-points-batch'); // Remover novo listener
+      
+      // Limpar intervalo de batching
+      // if (batchInterval) clearInterval(batchInterval);
     };
-  }, [roomCode, navigate]);
+  }, [roomCode, navigate, isDrawer, requestRoomStateThrottled, sendPointsBatch]);
 
   // Sincronizar newRounds com maxRounds sempre que maxRounds mudar
   useEffect(() => {
@@ -468,9 +754,29 @@ function Sala() {
     setIsTouchDrawing(false);
     setDrawing(false);
     setError('');
-    socketService.disconnect();
-    localStorage.removeItem('playerId');
-    navigate('/');
+    
+    // Notificar o servidor antes de desconectar
+    if (roomCode) {
+      console.log('Enviando notificação de saída da sala');
+      socketService.leaveRoom(roomCode)
+        .then(() => {
+          console.log('Saída da sala notificada com sucesso');
+          socketService.disconnect();
+          localStorage.removeItem('playerId');
+          navigate('/');
+        })
+        .catch(error => {
+          console.error('Erro ao notificar saída da sala:', error);
+          // Mesmo com erro, prosseguir com a saída local
+          socketService.disconnect();
+          localStorage.removeItem('playerId');
+          navigate('/');
+        });
+    } else {
+      socketService.disconnect();
+      localStorage.removeItem('playerId');
+      navigate('/');
+    }
   };
 
   const handleStartGame = () => {
@@ -493,12 +799,22 @@ function Sala() {
     lineStartingRef.current = true;
   };
 
-  // Função simplificada para desenhar ponto
+  // Função otimizada para desenhar ponto - agora usa o sistema de batching
   const handleDrawPoint = (point: { x: number; y: number; pressure?: number }) => {
     if (!isDrawer) return;
     
-    // Enviar o ponto para o servidor
-    console.log('Enviando ponto do desenhista:', point);
+    // Adicionar ponto à fila para envio em lote
+    pointQueueRef.current.push({ 
+      x: point.x, 
+      y: point.y,
+      pressure: point.pressure || 0.5,
+      isStartOfLine: lineStartingRef.current,
+      isSinglePoint: lineStartingRef.current && !drawingRef.current
+    });
+    
+    // Para garantir compatibilidade com o servidor atual, continuar enviando pontos individuais
+    // até que o servidor seja atualizado para suportar batching
+    console.log('Enviando ponto individual do desenhista para compatibilidade');
     socketService.getSocket().emit('draw-point', { 
       roomCode, 
       x: point.x, 
@@ -507,12 +823,22 @@ function Sala() {
       color: strokeColor, 
       size: strokeWidth,
       isStartOfLine: lineStartingRef.current,
+      isSinglePoint: lineStartingRef.current && !drawingRef.current,
       timestamp: Date.now()
     });
     
-    // Resetar flag de início de linha após o primeiro ponto
+    // Para pontos únicos (clique sem movimento) ou pontos de início de linha, enviar imediatamente
+    // para garantir resposta rápida para interações importantes
     if (lineStartingRef.current) {
+      console.log('Enviando ponto inicial imediatamente');
+      // sendPointsBatch(); - Desativado temporariamente
       lineStartingRef.current = false;
+    }
+    
+    // Se a fila ficar muito grande, enviar imediatamente
+    if (pointQueueRef.current.length > 20) {
+      // sendPointsBatch(); - Desativado temporariamente
+      pointQueueRef.current = []; // Limpar a fila mesmo assim para evitar acúmulo de memória
     }
   };
 
@@ -523,13 +849,13 @@ function Sala() {
     drawingRef.current = false;
   };
 
-  // Função para limpar o canvas
+  // Função para limpar o canvas - otimizada para evitar chamadas duplicadas
   const handleClearCanvas = () => {
     if (!isDrawer) return;
     
     // Evitar chamadas duplicadas usando timestamp
     const now = Date.now();
-    if (clearingRef.current && now - clearingRef.current < 300) {
+    if (clearingRef.current && now - clearingRef.current < 500) {
       console.log('Ignorando solicitação de limpeza duplicada');
       return;
     }
@@ -541,6 +867,7 @@ function Sala() {
     setPoints([]);
     setReceivedPoints([]);
     setLines([]);
+    pointQueueRef.current = []; // Limpar fila de pontos pendentes
     
     // Enviar evento para o servidor
     socketService.getSocket().emit('clear-canvas', { roomCode });
@@ -553,13 +880,13 @@ function Sala() {
       isClearCanvas: true, // Propriedade especial que indica que o canvas deve ser limpo
       color: strokeColor, 
       size: strokeWidth,
-      timestamp: Date.now()
+      timestamp: now
     });
     
     // Resetar flag após um delay maior
     setTimeout(() => {
       clearingRef.current = 0;
-    }, 300);
+    }, 500);
   };
 
   useEffect(() => {
@@ -573,6 +900,30 @@ function Sala() {
       window.removeEventListener('orientationchange', handleResize);
     };
   }, []);
+
+  // Garantir que o canvas seja exibido corretamente
+  useEffect(() => {
+    if (isGameStarted) {
+      console.log('Jogo iniciado, atualizando estado do canvas...');
+      // Pequeno atraso para garantir que os estados estejam atualizados
+      const timer = setTimeout(() => {
+        const canvas = document.querySelector('canvas');
+        if (canvas) {
+          console.log('Canvas encontrado, dimensões:', {
+            width: canvas.width,
+            height: canvas.height,
+            clientWidth: canvas.clientWidth,
+            clientHeight: canvas.clientHeight,
+            style: canvas.getAttribute('style')
+          });
+        } else {
+          console.error('Canvas não encontrado após início do jogo!');
+        }
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isGameStarted]);
 
   // Função para detetar se está em WebView/app
   function isInWebView() {
@@ -598,38 +949,290 @@ function Sala() {
     const socket = socketService.getSocket();
     const handleDisconnect = () => {
       setIsReconnecting(true);
+      console.error('Conexão com o servidor perdida. Tentando reconectar...');
     };
     const handleConnect = () => {
       setIsReconnecting(false);
+      console.log('Conexão com o servidor restabelecida!');
+      
+      // Solicitar estado atualizado da sala
+      if (roomCode) {
+        socket.emit('request-room-state', { roomCode });
+      }
     };
     socket.on('disconnect', handleDisconnect);
     socket.on('connect', handleConnect);
+    
+    // Adicionar tratamento para erros de conexão
+    const handleConnectError = (error: any) => {
+      console.error('Erro de conexão:', error);
+    };
+    socket.on('connect_error', handleConnectError);
+    
     return () => {
       socket.off('disconnect', handleDisconnect);
       socket.off('connect', handleConnect);
+      socket.off('connect_error', handleConnectError);
     };
-  }, []);
+  }, [roomCode]);
 
   // Diagnóstico: logar sempre que isDrawer muda
   useEffect(() => {
     console.log('isDrawer mudou:', isDrawer);
-  }, [isDrawer]);
+    console.log('isGameStarted:', isGameStarted);
+    console.log('receivedPoints:', receivedPoints.length);
+    console.log('podium:', podium);
+  }, [isDrawer, isGameStarted, receivedPoints, podium]);
 
-  // Função para renderizar a área do jogo em diferentes layouts
+  // Adicionar useEffect para monitorar mudanças no desenhista
+  useEffect(() => {
+    if (drawerId) {
+      console.log('Desenhista definido:', drawerId);
+      console.log('Este cliente é o desenhista?', drawerId === socket.id);
+      
+      // Se o jogo estiver em andamento e o desenhista for definido, mas isDrawer não
+      // estiver sincronizado, atualizar isDrawer
+      if (isGameStarted && drawerId === socket.id && !isDrawer) {
+        console.log('Corrigindo estado: este cliente deveria ser o desenhista');
+        setIsDrawer(true);
+        
+        // Solicitar palavra se necessário
+        if (!word) {
+          console.log('Solicitando palavra como desenhista');
+          socketService.getSocket().emit('request-room-state', { roomCode });
+        }
+      } else if (isGameStarted && drawerId !== socket.id && isDrawer) {
+        console.log('Corrigindo estado: este cliente não deveria ser o desenhista');
+        setIsDrawer(false);
+      }
+    }
+  }, [drawerId, isGameStarted, isDrawer, socket.id, word, roomCode]);
+
+  // Corrigir o useEffect específico para monitoring da última rodada
+  useEffect(() => {
+    // Verificar se estamos na última rodada
+    const isLastRoundCheck = round >= maxRounds;
+    if (isLastRoundCheck && isGameStarted) {
+      console.log('Estamos na última rodada!', {round, maxRounds});
+      
+      // Se o round estiver além do maxRounds, algo deu errado, forçar fim de jogo
+      if (round > maxRounds && isCurrentUserHost) {
+        console.log('Rodada excedeu o máximo - forçando fim de jogo');
+        socketService.getSocket().emit('end-game', { roomCode });
+      }
+    }
+  }, [round, maxRounds, isGameStarted, isCurrentUserHost, roomCode]);
+
+  // Adicionar debug para rodadas/timer não estarem corretos
+  useEffect(() => {
+    console.log(`[DEBUG] Estado atual: rodada=${round}/${maxRounds}, timer=${timer}, jogo_iniciado=${isGameStarted}, podium=${podium !== null}`);
+  }, [round, maxRounds, timer, isGameStarted, podium]);
+
+  // Adicionar função de utilidade para verificar rodada
+  const isLastRoundCheck = () => {
+    // Verificação ESTRITA para última rodada
+    const result = round === maxRounds;
+    console.log(`[CHECK] É última rodada? ${result} (${round}/${maxRounds}) - verificação estrita`);
+    return result;
+  };
+
+  // Melhor diagnóstico quando a rodada mudar
+  useEffect(() => {
+    console.log(`[RODADA] Rodada alterada para ${round}/${maxRounds}`);
+    
+    // Verificar se estamos na última rodada
+    if (round >= maxRounds && isGameStarted) {
+      console.log('[ALERTA] Iniciando ÚLTIMA rodada!');
+    }
+    
+    // Verificar se excedemos a última rodada
+    if (round > maxRounds && isGameStarted && !podium) {
+      console.log('[ERRO] Rodada excedeu o máximo sem exibir pódio!');
+      
+      // Força mostrar pódio se somos o host
+      if (isCurrentUserHost) {
+        console.log('[CORREÇÃO] Host forçando encerramento por rodada excedida');
+        const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+        setPodium(sortedPlayers);
+        
+        // Notificar outros usuários
+        setTimeout(() => {
+          socketService.getSocket().emit('end-game', { roomCode });
+        }, 1000);
+      }
+    }
+  }, [round, maxRounds, isGameStarted, isCurrentUserHost, players, podium, roomCode]);
+
+  // Adicionar verificação do timer para controle de final de jogo
+  useEffect(() => {
+    if (isGameStarted && round >= maxRounds && timer === 0 && !podium && !countdown) {
+      console.log('[VERIFICAÇÃO] Última rodada com timer zerado - verificando se deveria mostrar pódio');
+      
+      // Se encerra a última rodada e o timer zerou, mas não mostramos o pódio, provavelmente
+      // temos um problema e precisamos forçar o fim do jogo
+      if (isCurrentUserHost) {
+        console.log('[CORREÇÃO] Host forçando fim de jogo por fim de timer na última rodada');
+        const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+        
+        // Aguardar um pouco para verificar se o servidor vai enviar o pódio
+        setTimeout(() => {
+          if (!podium) {
+            console.log('[CORREÇÃO] Aplicando correção para mostrar pódio');
+            setPodium(sortedPlayers);
+            socketService.getSocket().emit('end-game', { roomCode });
+          }
+        }, 3000);
+      }
+    }
+  }, [timer, isGameStarted, round, maxRounds, podium, countdown, isCurrentUserHost, players, roomCode]);
+  
+  // Adicionar evento explícito para último round
+  socket.on('last-round', () => {
+    console.log('[ÚLTIMA RODADA] Servidor indicou que estamos na última rodada');
+    // Verificar se a rodada atual corresponde ao máximo
+    if (round !== maxRounds) {
+      console.log(`[CORREÇÃO] Atualizando rodada para corresponder à última: ${round} -> ${maxRounds}`);
+      setRound(maxRounds);
+    }
+  });
+
+  // Force final game status check on timer change - apenas na ÚLTIMA rodada (comparação ESTRITA)
+  useEffect(() => {
+    if (timer === 0 && isGameStarted && round === maxRounds) {
+      console.log('[VERIFICAÇÃO] Timer zerado na última rodada - verificando fim de jogo');
+      
+      // Wait a bit to see if server sends game-ended
+      setTimeout(() => {
+        if (isGameStarted && !podium && round === maxRounds) {
+          console.log('[CORREÇÃO] Forçando fim de jogo devido a timer zerado na última rodada');
+          
+          // Force show podium
+          const finalPlayers = [...players].sort((a, b) => b.score - a.score);
+          setPodium(finalPlayers);
+          setIsGameStarted(false);
+          
+          // If host, notify server
+          if (isCurrentUserHost) {
+            console.log('[HOST] Notificando servidor sobre fim forçado do jogo');
+            socketService.getSocket().emit('end-game', { roomCode });
+          }
+        }
+      }, 3000);
+    }
+  }, [timer, round, maxRounds, isGameStarted, podium, isCurrentUserHost, players, roomCode]);
+
+  // Add hacky global access to force show podium in case of problems
+  useEffect(() => {
+    // @ts-ignore
+    window.forceShowPodium = () => {
+      const forcedPodium = [...players].sort((a, b) => b.score - a.score);
+      console.log('[HACK] Forçando exibição do pódio', forcedPodium);
+      setPodium(forcedPodium);
+      setIsGameStarted(false);
+      return 'Pódio mostrado! Recarregue a página para voltar ao lobby.';
+    };
+    
+    return () => {
+      // @ts-ignore
+      window.forceShowPodium = undefined;
+    };
+  }, [players]);
+
+  // Utility function to force end game (callable from other hooks)
+  const forceEndGame = useCallback(() => {
+    console.log('[FORÇA] Forçando fim de jogo');
+    const forcedPodium = [...players].sort((a, b) => b.score - a.score);
+    setPodium(forcedPodium);
+    setIsGameStarted(false);
+    setIsDrawer(false);
+    
+    if (isCurrentUserHost) {
+      socketService.getSocket().emit('end-game', { roomCode });
+    }
+  }, [players, isCurrentUserHost, roomCode]);
+
+  // Add explicit monitoring for situations where game should have ended - comparação ESTRITA
+  useEffect(() => {
+    if (isGameStarted && round > maxRounds && !podium) {
+      console.log('[CORREÇÃO] Rodada excedeu máximo sem exibir pódio - forçando fim');
+      forceEndGame();
+    }
+  }, [round, maxRounds, isGameStarted, podium, forceEndGame]);
+
+  // Adicionar função de diagnóstico completo para ajudar a depurar
+  const logGameState = () => {
+    console.log(`
+      [DIAGNÓSTICO COMPLETO]
+      Rodada atual: ${round}
+      Total de rodadas: ${maxRounds}
+      É última rodada? ${round === maxRounds}
+      Jogo iniciado? ${isGameStarted}
+      Pódio visível? ${podium !== null}
+      Timer: ${timer}
+      Desenhista: ${drawerId?.substring(0, 6) || 'nenhum'}
+      Este cliente é desenhista? ${isDrawer}
+      Este cliente é host? ${isCurrentUserHost}
+      Número de jogadores: ${players.length}
+    `);
+  };
+
+  // Registrar o estado a cada alteração de round ou maxRounds
+  useEffect(() => {
+    console.log(`[MUDANÇA DE RODADA] Rodada: ${round}/${maxRounds}`);
+    logGameState();
+  }, [round, maxRounds]);
+
+  // Modify renderGameArea to ensure podium is always shown correctly
   const renderGameArea = () => {
+    const isLastRoundActive = isLastRoundCheck();
+    
+    console.log('[RENDER] Área de jogo:', {
+      isGameStarted,
+      isDrawer,
+      podium: podium ? true : false,
+      timer,
+      round,
+      maxRounds,
+      isLastRound: isLastRoundActive
+    });
+    
+    // Verificar a consistência: se o jogo estiver em andamento mas o pódio estiver visível
+    if (isGameStarted && podium !== null) {
+      console.log('[CORREÇÃO] Pódio visível durante jogo ativo - isto não deveria acontecer');
+      // Não renderizar o pódio neste caso
+      return renderActiveGameArea();
+    }
+    
     // Mostrar pódio quando o jogo acabou
     if (podium) {
-      return (
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
-          <h2 className="text-2xl font-bold text-yellow-300 mb-4">🏆 Fim do Jogo 🏆</h2>
+      return renderPodium();
+    }
+    
+    return renderActiveGameArea();
+  };
+
+  // Função separada para renderizar o pódio
+  const renderPodium = () => {
+    console.log('[RENDER] Exibindo pódio final com', podium?.length || 0, 'jogadores');
+    return (
+      <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center relative">
+        {/* Efeito especial para o fim do jogo */}
+        <div className="absolute -top-6 left-0 right-0 text-center">
+          <div className="inline-block bg-gradient-to-r from-yellow-400 via-red-500 to-yellow-400 text-white px-4 py-1 rounded-full font-bold animate-pulse">
+            FIM DO JOGO
+          </div>
+        </div>
+        
+        <h2 className="text-2xl font-bold text-yellow-300 mb-4">🏆 Fim do Jogo 🏆</h2>
+        
+        <div className="bg-blue-900/50 rounded-lg p-4 mb-4">
+          <h3 className="text-xl font-bold mb-3 text-white">Pontuações Finais</h3>
           
-          <div className="bg-blue-900/50 rounded-lg p-4 mb-4">
-            <h3 className="text-xl font-bold mb-3 text-white">Pontuações Finais</h3>
-            
-            <div className="grid gap-3">
-              {podium.map((player, index) => (
+          <div className="grid gap-3">
+            {podium && podium.length > 0 ? (
+              podium.map((player, index) => (
                 <div 
-                  key={player.id} 
+                  key={player.id || index} 
                   className={`flex items-center p-3 rounded-lg ${
                     index === 0 ? 'bg-yellow-500/50 text-white' : 
                     index === 1 ? 'bg-gray-400/50 text-white' : 
@@ -646,34 +1249,54 @@ function Sala() {
                   </div>
                   <span className="text-2xl font-bold text-yellow-300">{player.score} pts</span>
                 </div>
-              ))}
-            </div>
+              ))
+            ) : (
+              <div className="text-yellow-300 p-4 text-center">
+                Nenhum jogador encontrado. Algo deu errado!
+              </div>
+            )}
           </div>
-          
-          {isCurrentUserHost && (
-            <button
-              onClick={() => {
-                socketService.getSocket().emit('restart-game', { roomCode, rounds: newRounds });
-              }}
-              className="bg-green-500 text-white px-6 py-3 mt-2 rounded-lg hover:bg-green-600 transition text-lg font-bold shadow flex items-center justify-center gap-2 mx-auto"
-            >
-              <span role="img" aria-label="recomeçar">🔄</span> Reiniciar Jogo
-            </button>
-          )}
-          
-          {!isCurrentUserHost && (
-            <p className="text-sm text-center mt-4 italic">
-              Aguardando o host iniciar um novo jogo...
-            </p>
-          )}
         </div>
-      );
-    }
-    
+        
+        {isCurrentUserHost && (
+          <button
+            onClick={() => {
+              console.log('[HOST] Reiniciando jogo com', newRounds, 'rodadas');
+              socketService.getSocket().emit('restart-game', { roomCode, rounds: newRounds });
+            }}
+            className="bg-green-500 text-white px-6 py-3 mt-2 rounded-lg hover:bg-green-600 transition text-lg font-bold shadow flex items-center justify-center gap-2 mx-auto"
+          >
+            <span role="img" aria-label="recomeçar">🔄</span> Reiniciar Jogo
+          </button>
+        )}
+        
+        {!isCurrentUserHost && (
+          <p className="text-sm text-center mt-4 italic">
+            Aguardando o host iniciar um novo jogo...
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  // Função separada para renderizar a área de jogo ativa
+  const renderActiveGameArea = () => {
     if (!isGameStarted) {
+      // Jogo não iniciado
       return (
         <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
           <p className="text-xl mb-4">Aguardando início do jogo...</p>
+          
+          {/* Canvas invisível para pré-carregar */}
+          <div className="hidden">
+            <DrawingCanvas
+              isDrawer={false}
+              strokeColor={strokeColor}
+              strokeWidth={strokeWidth}
+              receivedPoints={[]}
+            />
+          </div>
+          
           {isCurrentUserHost && (
             <div className="mt-4">
               <div className="mb-4">
@@ -703,6 +1326,7 @@ function Sala() {
     }
 
     if (isDrawer) {
+      // Modo desenhista
       return (
         <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-2">
@@ -711,6 +1335,20 @@ function Sala() {
               <span className="mr-2">Palavra:</span>
               <span className="font-mono bg-yellow-200 text-blue-900 px-2 py-1 rounded">{word}</span>
             </p>
+            {timer > 0 && (
+              <div className="mt-2 md:mt-0 md:ml-2">
+                <span className={`${round === maxRounds ? 'bg-orange-400' : 'bg-yellow-300'} text-blue-900 px-3 py-1 rounded-lg font-bold`}>
+                  {round === maxRounds && <span className="mr-1">🔥</span>}
+                  {timer}s
+                  {round === maxRounds && <span className="ml-1">🔥</span>}
+                </span>
+                {round === maxRounds && (
+                  <div className="mt-1 text-xs text-orange-300 font-bold animate-pulse">
+                    ÚLTIMA RODADA!
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           
           <div className={deviceType === 'mobile' ? 'mt-2' : 'mt-4'}>
@@ -733,11 +1371,31 @@ function Sala() {
       );
     }
     
+    // Modo espectador/adivinhação
     return (
       <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
         <p className="text-xl mb-2 text-blue-200 font-bold">
-          {deviceType === 'mobile' ? 'Adivinhe o desenho!' : 'Aguardando o desenhista desenhar...'}
+          {timer > 0 
+            ? 'Adivinhe o desenho!' 
+            : drawerId 
+              ? 'Aguardando o desenhista desenhar...' 
+              : 'Aguardando definição do desenhista...'}
         </p>
+        
+        {timer > 0 && (
+          <div className="mt-1 mb-2">
+            <span className={`${round === maxRounds ? 'bg-orange-400' : 'bg-yellow-300'} text-blue-900 px-3 py-1 rounded-lg font-bold`}>
+              {round === maxRounds && <span className="mr-1">🔥</span>}
+              {timer}s
+              {round === maxRounds && <span className="ml-1">🔥</span>}
+            </span>
+            {round === maxRounds && (
+              <div className="mt-1 text-xs text-orange-300 font-bold animate-pulse">
+                ÚLTIMA RODADA!
+              </div>
+            )}
+          </div>
+        )}
         
         <div className={deviceType === 'mobile' ? 'mt-2' : 'mt-4'}>
           <DrawingCanvas
@@ -790,71 +1448,17 @@ function Sala() {
     );
   };
 
-  const renderPlayersList = () => {
-    return (
-      <div className={`bg-white/10 backdrop-blur-sm rounded-lg p-4 ${deviceType === 'mobile' ? 'mb-3' : 'mb-6'}`}>
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="font-semibold">Jogadores ({players.filter(p => p.online !== false).length}/{players.length})</h2>
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-yellow-200">Ronda: {round}/{maxRounds}</span>
-            {timer > 0 && (
-              <span className="ml-2 bg-yellow-300 text-blue-900 px-2 py-1 rounded-lg text-sm font-bold">
-                {timer}s
-              </span>
-            )}
-          </div>
-        </div>
-        
-        <ul className={`space-y-1 overflow-y-auto w-full ${deviceType === 'mobile' ? 'max-h-28' : 'max-h-40 sm:max-h-64'}`}>
-          {players
-            .sort((a, b) => {
-              // Ordenar: primeiro os online, depois por pontuação, depois por nome
-              if ((a.online === false) !== (b.online === false)) {
-                return a.online === false ? 1 : -1; // Online primeiro
-              }
-              if (b.score !== a.score) {
-                return b.score - a.score; // Maior pontuação primeiro
-              }
-              return a.name.localeCompare(b.name); // Ordem alfabética
-            })
-            .map(player => (
-              <li 
-                key={player.id} 
-                className={`flex items-center gap-2 p-2 rounded 
-                  ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}
-                  ${player.online === false ? 'bg-white/5 opacity-50' : 'bg-white/10'}
-                `}
-              >
-                <span className="flex-1 flex items-center gap-1 truncate">
-                  {drawerId === player.id && (
-                    <span className="text-yellow-300 mr-1">✏️</span>
-                  )}
-                  {player.name}
-                  {player.online === false && (
-                    <span title="Offline" className="ml-1 text-xs text-red-400 flex items-center gap-1 font-bold">
-                      <svg width="8" height="8" viewBox="0 0 10 10" fill="red" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="5" r="5"/></svg>
-                      {deviceType !== 'mobile' && 'offline'}
-                    </span>
-                  )}
-                </span>
-                <span className="text-yellow-300 whitespace-nowrap">{player.score} pts</span>
-                {player.isHost && (
-                  <span className="bg-yellow-300 text-blue-900 text-xs px-1 py-0.5 rounded">HOST</span>
-                )}
-              </li>
-            ))}
-        </ul>
-      </div>
-    );
-  };
-
+  // Atualizar renderização do header para mostrar claramente a rodada atual
   const renderHeaderControls = () => {
+    // Definir isLastRound dentro desta função para uso local
+    const isLastRoundIndicator = round >= maxRounds;
+    
     return (
-      <div className={`flex flex-col items-center justify-center gap-2 ${deviceType === 'mobile' ? 'mb-2' : 'mb-4'}`}>
-        <div className={`flex ${deviceType === 'mobile' ? 'flex-col gap-1' : 'flex-row gap-3'} justify-center w-full`}>
+      <div className={`flex flex-col items-center justify-center ${deviceType === 'mobile' ? 'gap-1 mb-1' : 'gap-2 mb-4'}`}>
+        <div className={`flex ${deviceType === 'mobile' ? 'flex-row gap-1' : 'flex-row gap-3'} justify-center w-full`}>
           <div className="flex gap-2 justify-center">
             <button
-              className="bg-green-400 text-white px-3 py-2 rounded font-bold shadow hover:bg-green-500 transition text-sm flex items-center gap-1"
+              className={`bg-green-400 text-white ${deviceType === 'mobile' ? 'px-2 py-1 text-xs' : 'px-3 py-2 text-sm'} rounded font-bold shadow hover:bg-green-500 transition flex items-center gap-1`}
               onClick={() => {
                 const url = `https://desenharapido.netlify.app/entrar-sala?codigo=${roomCode}`;
                 const texto = `Junta-te à minha sala! Clica aqui para entrar: ${url}`;
@@ -863,25 +1467,31 @@ function Sala() {
               }}
               title="Partilhar no WhatsApp"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M20.52 3.48A12.07 12.07 0 0 0 12 0C5.37 0 0 5.37 0 12a11.93 11.93 0 0 0 1.64 6L0 24l6.26-1.64A12.07 12.07 0 0 0 12 24c6.63 0 12-5.37 12-12a11.93 11.93 0 0 0-3.48-8.52zM12 22a9.93 9.93 0 0 1-5.13-1.41l-.37-.22-3.72.98.99-3.62-.24-.37A9.93 9.93 0 1 1 12 22zm5.47-7.14c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.27-.47-2.42-1.5-.9-.8-1.5-1.77-1.67-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.62-.92-2.22-.24-.58-.5-.5-.67-.5h-.57c-.2 0-.52.07-.8.37-.27.3-1.05 1.02-1.05 2.5 0 1.47 1.07 2.9 1.22 3.1.15.2 2.1 3.2 5.1 4.37.71.31 1.26.5 1.69.64.71.23 1.36.2 1.87.12.57-.08 1.77-.72 2.02-1.42.25-.7.25-1.3.17-1.42-.08-.12-.27-.2-.57-.35z"/>
-              </svg>
+              <span role="img" aria-label="share">📱</span>
               <span>{deviceType === 'mobile' ? 'Convidar' : 'Convidar amigos'}</span>
             </button>
           </div>
           <button
             onClick={handleLeaveRoom}
-            className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition text-sm font-bold shadow flex items-center gap-1"
+            className={`bg-red-500 text-white ${deviceType === 'mobile' ? 'px-2 py-1 text-xs' : 'px-4 py-2 text-sm'} rounded hover:bg-red-600 transition font-bold shadow flex items-center gap-1`}
           >
             <span role="img" aria-label="sair">🚪</span> {deviceType === 'mobile' ? 'Sair' : 'Sair da Sala'}
           </button>
         </div>
         
         <div className="flex flex-col items-center">
-          <span className="bg-blue-800 text-white px-3 py-1 rounded-lg font-medium shadow text-sm flex items-center gap-1">
+          <span className={`bg-blue-800 text-white ${deviceType === 'mobile' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm'} rounded-lg font-medium shadow flex items-center gap-1`}>
             <span role="img" aria-label="jogadores">👥</span> {players.length} {deviceType !== 'mobile' && 'jogadores'}
           </span>
-          <h1 className={`font-bold text-center mt-1 break-all ${deviceType === 'mobile' ? 'text-lg' : 'text-xl sm:text-2xl'}`}>
+          
+          {isGameStarted && (
+            <div className={`${deviceType === 'mobile' ? 'mt-1 text-sm' : 'mt-2 text-base'} font-bold ${isLastRoundIndicator ? 'text-orange-300' : 'text-yellow-200'}`}>
+              Rodada: {round}/{maxRounds}
+              {isLastRoundIndicator && <span className="ml-1 animate-pulse">🔥 ÚLTIMA! 🔥</span>}
+            </div>
+          )}
+          
+          <h1 className={`font-bold text-center ${deviceType === 'mobile' ? 'mt-0.5 text-base' : 'mt-1 text-xl sm:text-2xl'} break-all`}>
             <span className="opacity-80">Sala:</span> {roomCode}
           </h1>
         </div>
@@ -902,6 +1512,78 @@ function Sala() {
     if (!guess.trim() || guessedCorrectly) return;
     socketService.getSocket().emit('guess', { roomCode, text: guess });
     setGuess('');
+  };
+
+  // Adicionar função de renderização da lista de jogadores
+  const renderPlayersList = () => {
+    const socket = socketService.getSocket();
+    const currentPlayerId = socket.id;
+    
+    return (
+      <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
+        <h2 className={`${deviceType === 'mobile' ? 'text-lg' : 'text-xl'} font-bold mb-2 text-center`}>Jogadores</h2>
+        
+        <div className={`overflow-y-auto ${deviceType === 'mobile' ? 'max-h-32' : 'max-h-96'}`}>
+          {players.length === 0 ? (
+            <p className="text-center py-2 text-white/60">Nenhum jogador na sala...</p>
+          ) : (
+            <div className="grid gap-2">
+              {players.map((player) => (
+                <div 
+                  key={player.id} 
+                  className={`flex items-center justify-between p-2 rounded-lg ${
+                    player.online === false ? 'bg-red-500/20' : 
+                    player.id === drawerId ? 'bg-green-500/30' : 
+                    'bg-white/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {player.online === false && (
+                      <span className="text-red-300" title="Desconectado">⚠️</span>
+                    )}
+                    {player.id === drawerId && (
+                      <span className="text-green-300" title="Desenhista">✏️</span>
+                    )}
+                    <span className={`${player.online === false ? 'text-gray-400' : ''}`}>
+                      {player.name}
+                    </span>
+                    {player.isHost && (
+                      <span className="bg-yellow-300 text-blue-900 text-xs px-1 py-0.5 rounded">HOST</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold">{player.score}</span>
+                    {/* Adicionar botão de remover jogador quando usuário atual for host */}
+                    {isCurrentUserHost && player.id !== currentPlayerId && (
+                      <button 
+                        onClick={() => handleRemovePlayer(player.id)}
+                        className="text-red-400 hover:text-red-300 text-sm p-1"
+                        title="Remover jogador"
+                      >
+                        ❌
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Adicionar função para remover jogador (só pode ser chamada pelo host)
+  const handleRemovePlayer = (playerId: string) => {
+    if (!isCurrentUserHost || !roomCode) return;
+    
+    // Confirmar antes de remover
+    if (window.confirm('Tem certeza que deseja remover este jogador?')) {
+      console.log(`Host está removendo jogador ${playerId}`);
+      socketService.removePlayer(roomCode, playerId)
+        .then(() => console.log('Jogador removido com sucesso'))
+        .catch(err => console.error('Erro ao remover jogador:', err));
+    }
   };
 
   if (isLoading) {
@@ -948,13 +1630,13 @@ function Sala() {
         </div>
       )}
       
-      <div className={`flex-1 flex items-center justify-center w-full p-2 ${deviceType === 'mobile' ? 'py-1' : 'p-4'}`}>
-        <div className={`w-full max-w-4xl flex flex-col items-center justify-center ${deviceType === 'mobile' ? 'space-y-2' : 'space-y-4'}`}>
+      <div className={`flex-1 flex items-center justify-center w-full p-2 ${deviceType === 'mobile' ? 'py-1 px-1' : 'p-4'}`}>
+        <div className={`w-full max-w-4xl flex flex-col items-center justify-center ${deviceType === 'mobile' ? 'space-y-1' : 'space-y-4'}`}>
           {/* Cabeçalho com controles */}
           {renderHeaderControls()}
           
           {/* Layout principal */}
-          <div className={`w-full grid ${deviceType === 'desktop' ? 'grid-cols-[1fr_2fr]' : 'grid-cols-1'} gap-4`}>
+          <div className={`w-full grid ${deviceType === 'desktop' ? 'grid-cols-[1fr_2fr]' : 'grid-cols-1'} ${deviceType === 'mobile' ? 'gap-2' : 'gap-4'}`}>
             {/* Lista de jogadores */}
             {deviceType === 'desktop' ? (
               <div>
@@ -967,8 +1649,10 @@ function Sala() {
           </div>
           
           {/* Área de notificações */}
-          {isGameStarted && deviceType !== 'mobile' && timer > 0 && (
-            <div className="mb-4 text-2xl font-bold text-yellow-300">Tempo restante: {timer}s</div>
+          {isGameStarted && timer > 0 && (
+            <div className={`${deviceType === 'mobile' ? 'mb-1 text-xl' : 'mb-4 text-2xl'} font-bold text-yellow-300`}>
+              Tempo restante: {timer}s
+            </div>
           )}
         </div>
       </div>
@@ -986,17 +1670,22 @@ function Sala() {
       {countdown !== null && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
           <div className={`flex flex-col items-center justify-center gap-4`}>
-            <div className={`relative rounded-full flex items-center justify-center ${isLastRoundCountdown ? 'bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500' : 'bg-yellow-300'} text-blue-900 font-extrabold ${deviceType === 'mobile' ? 'w-36 h-36 text-6xl' : 'w-48 h-48 text-7xl'} ${countdown === 1 ? 'animate-bounce' : 'animate-pulse'}`}>
+            <div className={`relative rounded-full flex items-center justify-center ${isLastRoundCountdown ? 'bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500' : 'bg-yellow-300'} text-blue-900 font-extrabold ${deviceType === 'mobile' ? 'w-36 h-36 text-6xl' : 'w-48 h-48 text-7xl'} ${countdown === 1 ? 'animate-bounce' : 'animate-pulse'}`} style={{ boxShadow: isLastRoundCountdown ? '0 0 20px 5px rgba(255, 165, 0, 0.5)' : 'none' }}>
               <div className="absolute inset-0 rounded-full opacity-20 animate-ping bg-white"></div>
-              <div className="absolute inset-0 rounded-full animate-spin-slow border-4 border-dashed border-white opacity-70"></div>
+              <div className={`absolute inset-0 rounded-full animate-spin-slow border-4 border-dashed ${isLastRoundCountdown ? 'border-orange-300' : 'border-white'} opacity-70`}></div>
               {countdown}
             </div>
             
             <div className={`text-white font-bold text-center ${deviceType === 'mobile' ? 'text-xl' : 'text-2xl'} transform ${isLastRoundCountdown ? 'scale-110' : ''} transition-transform`}>
               {isLastRoundCountdown ? (
-                <span className="animate-pulse text-yellow-300">🔥 ÚLTIMA RODADA 🔥</span>
+                <span className="animate-pulse text-yellow-300" style={{ textShadow: '0 0 10px rgba(255, 165, 0, 0.8)' }}>
+                  🔥 ÚLTIMA RODADA 🔥
+                </span>
               ) : (
-                <span>Preparar para a rodada {round}/{maxRounds}</span>
+                <span>
+                  Preparar para a rodada {round}/{maxRounds}
+                  {round === maxRounds - 1 && <span className="mt-1 block text-sm text-yellow-300">(Próxima será a última!)</span>}
+                </span>
               )}
             </div>
             

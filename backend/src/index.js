@@ -10,7 +10,10 @@ const FRONTEND_URL = 'https://desenharapido.netlify.app';
 const PLAYER_TIMEOUT = 120000; // 2 minutos  
 
 // Tempo em milissegundos para verificar e limpar salas vazias
-const ROOM_CLEANUP_INTERVAL = 300000; // 5 minutos
+const ROOM_CLEANUP_INTERVAL = 60000; // 1 minuto
+
+// Tempo em milissegundos que uma sala vazia pode permanecer antes de ser removida
+const EMPTY_ROOM_TIMEOUT = 30000; // 30 segundos
 
 const app = express();
 const server = http.createServer(app);
@@ -221,18 +224,41 @@ function nextRoundOrEnd(room, io) {
 function cleanupRooms() {
   console.log(`Iniciando limpeza de salas vazias. Total de salas: ${rooms.size}`);
   let roomsRemoved = 0;
+  const now = Date.now();
   
   for (const [code, room] of rooms.entries()) {
     // Verificar se a sala está vazia (não tem jogadores ou todos estão offline)
-    const hasActivePlayers = room.players.some(p => p.online !== false);
+    const onlinePlayers = room.players.filter(p => p.online !== false);
+    const hasActivePlayers = onlinePlayers.length > 0;
+    
+    // Se a sala não tem jogadores online
+    if (!hasActivePlayers) {
+      // Se este é o primeiro ciclo detectando sala vazia, registrar o timestamp
+      if (!room._emptyRoomTimestamp) {
+        room._emptyRoomTimestamp = now;
+        console.log(`Sala ${code} ficou vazia. Marcando para possível remoção.`);
+      } 
+      // Se já passou do tempo limite de sala vazia, remover
+      else if (now - room._emptyRoomTimestamp > EMPTY_ROOM_TIMEOUT) {
+        console.log(`Removendo sala ${code}: sala vazia por mais de ${EMPTY_ROOM_TIMEOUT/1000} segundos`);
+        rooms.delete(code);
+        pendingPointsByRoom.delete(code);
+        roomsRemoved++;
+      }
+    } else {
+      // Se a sala tem jogadores online, resetar o timestamp de sala vazia
+      if (room._emptyRoomTimestamp) {
+        delete room._emptyRoomTimestamp;
+      }
+    }
     
     // Verificar se a sala está inativa há muito tempo
     const isInactive = room.status === 'waiting' && 
                       room.lastActivity && 
-                      (Date.now() - room.lastActivity > 3600000); // 1 hora sem atividade
+                      (now - room.lastActivity > 3600000); // 1 hora sem atividade
     
-    if (!hasActivePlayers || isInactive) {
-      console.log(`Removendo sala ${code}: ${!hasActivePlayers ? 'sem jogadores online' : 'inativa'}`);
+    if (isInactive) {
+      console.log(`Removendo sala ${code}: inativa por mais de 1 hora`);
       rooms.delete(code);
       pendingPointsByRoom.delete(code);
       roomsRemoved++;
@@ -244,6 +270,35 @@ function cleanupRooms() {
 
 // Iniciar o limpador de salas a cada intervalo definido
 setInterval(cleanupRooms, ROOM_CLEANUP_INTERVAL);
+
+// Função para verificar e eliminar salas vazias imediatamente
+function checkAndRemoveEmptyRoom(roomCode) {
+  if (!roomCode || !rooms.has(roomCode)) return false;
+  
+  const room = rooms.get(roomCode);
+  
+  // Verifica se não há jogadores ou se todos estão offline
+  const onlinePlayers = room.players.filter(p => p.online !== false);
+  
+  if (onlinePlayers.length === 0) {
+    // Se a sala está totalmente vazia (0 jogadores ou todos offline)
+    if (room.players.length === 0) {
+      // Eliminar imediatamente se não houver jogadores
+      console.log(`Eliminando sala vazia ${roomCode} imediatamente (sem jogadores)`);
+      rooms.delete(roomCode);
+      pendingPointsByRoom.delete(roomCode);
+      return true;
+    } else {
+      // Se tem jogadores offline, marcar timestamp para remoção posterior
+      if (!room._emptyRoomTimestamp) {
+        room._emptyRoomTimestamp = Date.now();
+        console.log(`Sala ${roomCode} ficou sem jogadores online. Marcando para possível remoção.`);
+      }
+    }
+  }
+  
+  return false;
+}
 
 io.on('connection', (socket) => {
   console.log('Novo usuário conectado:', socket.id);
@@ -495,6 +550,17 @@ io.on('connection', (socket) => {
               id, playerId, name, score, isHost, online
             }))
           });
+          
+          // Verificar se a sala ficou vazia depois que o jogador saiu
+          const onlinePlayers = room.players.filter(p => p.online !== false);
+          if (onlinePlayers.length === 0) {
+            console.log(`Todos os jogadores saíram da sala ${roomCode}. Eliminando imediatamente.`);
+            rooms.delete(roomCode);
+            pendingPointsByRoom.delete(roomCode);
+            console.log(`Sala ${roomCode} eliminada por estar vazia.`);
+            return;
+          }
+
           // Timeout de 120s para remoção definitiva
           player._removeTimeout = setTimeout(() => {
             // Remover jogador da sala
@@ -503,16 +569,9 @@ io.on('connection', (socket) => {
             io.to(player.id).emit('removed-by-timeout');
             console.log(`${userName || socket.id} removido da sala ${roomCode} por timeout de reconexão`);
             
-            // Contar jogadores online restantes
-            const onlinePlayers = room.players.filter(p => p.online !== false);
-            
-            // Se não sobrou ninguém online, deletar a sala
-            if (onlinePlayers.length === 0) {
-              console.log(`Nenhum jogador online restante na sala ${roomCode}. Eliminando a sala.`);
-              rooms.delete(roomCode);
-              pendingPointsByRoom.delete(roomCode); // Limpa buffer de pontos pendentes
-              console.log(`Sala ${roomCode} deletada pois ficou sem jogadores online`);
-              return;
+            // Verificar e eliminar a sala se ficou vazia
+            if (checkAndRemoveEmptyRoom(roomCode)) {
+              return; // Sala já foi eliminada, não continuar
             }
             
             // Se o host saiu, passar o controle para outro jogador
@@ -564,6 +623,102 @@ io.on('connection', (socket) => {
     room.round = 1;
     room.id = roomCode; // garantir que room tem id
     startRound(room, io);
+  });
+
+  // Evento para remoção explícita de jogador (usado pelo host ou pelo próprio jogador)
+  socket.on('remove-player', ({ roomCode, playerIdToRemove, reason = 'kicked' }, callback) => {
+    console.log(`Solicitação para remover jogador ${playerIdToRemove} da sala ${roomCode}. Motivo: ${reason}`);
+    
+    if (!roomCode || !rooms.has(roomCode)) {
+      if (callback) callback({ success: false, error: 'Sala não encontrada' });
+      return;
+    }
+    
+    const room = rooms.get(roomCode);
+    
+    // Verificar se o solicitante é o host (exceto para auto-remoção)
+    const isHost = room.players.find(p => p.id === socket.id)?.isHost;
+    const isSelfRemoval = playerIdToRemove === socket.id || playerIdToRemove === socket.data.playerId;
+    
+    if (!isHost && !isSelfRemoval) {
+      console.log(`Rejeitada remoção de jogador: solicitante não é host nem o próprio jogador`);
+      if (callback) callback({ success: false, error: 'Permissão negada' });
+      return;
+    }
+    
+    // Encontrar o jogador a ser removido
+    const playerToRemove = room.players.find(p => p.id === playerIdToRemove || p.playerId === playerIdToRemove);
+    if (!playerToRemove) {
+      console.log(`Jogador ${playerIdToRemove} não encontrado na sala ${roomCode}`);
+      if (callback) callback({ success: false, error: 'Jogador não encontrado' });
+      return;
+    }
+    
+    // Registrar atividade na sala
+    room.lastActivity = Date.now();
+    
+    // Remover o jogador
+    console.log(`Removendo jogador ${playerToRemove.name} da sala ${roomCode}`);
+    room.players = room.players.filter(p => p.id !== playerIdToRemove && p.playerId !== playerIdToRemove);
+    
+    // Notificar o jogador removido
+    io.to(playerToRemove.id).emit('removed-from-room', { reason });
+    
+    // Verificar se a sala ficou vazia
+    if (checkAndRemoveEmptyRoom(roomCode)) {
+      if (callback) callback({ success: true, message: 'Jogador removido e sala eliminada' });
+      return; // Sala já foi eliminada, não continuar
+    }
+    
+    // Se o removido era o host, transferir controle
+    if (playerToRemove.isHost && room.players.length > 0) {
+      room.players[0].isHost = true;
+      room.host = room.players[0].id;
+      console.log(`Novo host: ${room.players[0].name}`);
+      
+      // Notificar sobre mudança de host
+      io.to(roomCode).emit('host-left', {
+        newHostId: room.players[0].id,
+        newHostName: room.players[0].name
+      });
+    }
+    
+    // Se era o desenhista atual, notificar
+    if (room.currentDrawer === playerToRemove.id) {
+      io.to(roomCode).emit('drawer-left', {
+        drawerId: playerToRemove.id,
+        drawerName: playerToRemove.name
+      });
+      
+      // Se estiver em jogo, considerar encerrar a rodada atual
+      if (room.status === 'playing') {
+        clearInterval(room.timerInterval);
+        io.to(roomCode).emit('round-ended', { reason: 'drawer-left' });
+        setTimeout(() => nextRoundOrEnd(room, io), 3000);
+      }
+    }
+    
+    // Notificar jogadores restantes
+    io.to(roomCode).emit('player-left', {
+      playerId: playerToRemove.playerId || playerToRemove.id,
+      playerName: playerToRemove.name,
+      players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+        id, playerId, name, score, isHost, online
+      }))
+    });
+    
+    // Emitir atualização de jogadores
+    io.to(roomCode).emit('players-update', {
+      players: room.players.map(({ id, playerId, name, score, isHost, online }) => ({
+        id, playerId, name, score, isHost, online
+      })),
+      drawerId: room.currentDrawer,
+      round: room.round,
+      maxRounds: room.maxRounds
+    });
+
+    // Responder ao cliente
+    if (callback) callback({ success: true });
   });
 
   // Receber traço do desenhista e repassar para a sala
