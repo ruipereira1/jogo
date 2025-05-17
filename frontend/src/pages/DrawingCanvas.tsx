@@ -394,7 +394,7 @@ const DrawingCanvas: React.FC<Props> = ({
 
   // Processar pontos recebidos quando não é o desenhista, usando o processamento em lote
   useEffect(() => {
-    if (isDrawer || !receivedPoints || receivedPoints.length === 0) return;
+    if (isDrawer || !Array.isArray(receivedPoints) || receivedPoints.length === 0) return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -402,73 +402,90 @@ const DrawingCanvas: React.FC<Props> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    console.log(`Processando ${receivedPoints.length} pontos recebidos`);
-    
-    // Garantir que o canvas esteja visível
-    canvas.style.display = 'block';
-    
-    // Verificar se há um comando explícito de limpeza em vez de limpar automaticamente
-    const hasClearCommand = receivedPoints.some(p => p.isClearCanvas === true || p.o === 2);
-    
-    // Só limpar se houver um comando explícito de limpeza
-    if (hasClearCommand) {
-      console.log('Comando de limpeza detectado, limpando canvas');
-      ctx.fillStyle = 'white';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      lastClientPointsRef.current = {}; // Resetar pontos armazenados
-      return; // Se for limpar o canvas, ignorar o resto do processamento
+    try {
+      console.log(`Processando ${receivedPoints.length} pontos recebidos`);
+      
+      // Garantir que o canvas esteja visível
+      canvas.style.display = 'block';
+      
+      // Verificar se há um comando explícito de limpeza em vez de limpar automaticamente
+      const hasClearCommand = receivedPoints.some(p => p && (p.isClearCanvas === true || p.o === 2));
+      
+      // Só limpar se houver um comando explícito de limpeza
+      if (hasClearCommand) {
+        console.log('Comando de limpeza detectado, limpando canvas');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        lastClientPointsRef.current = {}; // Resetar pontos armazenados
+        return; // Se for limpar o canvas, ignorar o resto do processamento
+      }
+      
+      // Renderização direta para pontos individuais (compatibilidade com servidor atual)
+      // Primeiro desenhar em 2D diretamente para resposta visual rápida
+      const rect = canvas.getBoundingClientRect();
+      
+      // Apenas processar pontos válidos
+      const validPoints = receivedPoints.filter(point => 
+        point && typeof point.x === 'number' && typeof point.y === 'number' && 
+        !isNaN(point.x) && !isNaN(point.y)
+      );
+      
+      validPoints.forEach(point => {
+        // Verificar se é um ponto único e renderizar imediatamente
+        if (point.isSinglePoint) {
+          console.log('Desenhando ponto único diretamente:', point);
+          ctx.save();
+          ctx.fillStyle = point.color || strokeColor;
+          ctx.beginPath();
+          ctx.arc(
+            point.x * rect.width, 
+            point.y * rect.height, 
+            (point.size || strokeWidth) / 2, 
+            0, 
+            Math.PI * 2
+          );
+          ctx.fill();
+          ctx.restore();
+          return;
+        }
+        
+        // Se temos um ponto anterior para este cliente, desenhar linha
+        const clientId = point.clientId || 'default';
+        const lastPoint = lastClientPointsRef.current[clientId] as Point;
+        
+        if (lastPoint && !point.isStartOfLine) {
+          // Verificar se as coordenadas do último ponto são válidas
+          if (typeof lastPoint.x !== 'number' || typeof lastPoint.y !== 'number' ||
+              isNaN(lastPoint.x) || isNaN(lastPoint.y)) {
+            console.warn('Último ponto com coordenadas inválidas:', lastPoint);
+            return;
+          }
+            
+          // Desenhar uma linha conectando o último ponto a este
+          ctx.save();
+          ctx.strokeStyle = point.color || strokeColor;
+          ctx.lineWidth = point.size || strokeWidth;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.beginPath();
+          ctx.moveTo(lastPoint.x * rect.width, lastPoint.y * rect.height);
+          ctx.lineTo(point.x * rect.width, point.y * rect.height);
+          ctx.stroke();
+          ctx.restore();
+        }
+        
+        // Atualizar o último ponto para este cliente
+        lastClientPointsRef.current[clientId] = { 
+          x: point.x, 
+          y: point.y 
+        } as Point;
+      });
+      
+      // Também enviar para o processador otimizado em lote para linhas suaves
+      processReceivedPoints(validPoints);
+    } catch (error) {
+      console.error('Erro ao processar pontos recebidos:', error);
     }
-    
-    // Renderização direta para pontos individuais (compatibilidade com servidor atual)
-    // Primeiro desenhar em 2D diretamente para resposta visual rápida
-    const rect = canvas.getBoundingClientRect();
-    
-    receivedPoints.forEach(point => {
-      // Verificar se é um ponto único e renderizar imediatamente
-      if (point.isSinglePoint) {
-        console.log('Desenhando ponto único diretamente:', point);
-        ctx.save();
-        ctx.fillStyle = point.color || strokeColor;
-        ctx.beginPath();
-        ctx.arc(
-          point.x * rect.width, 
-          point.y * rect.height, 
-          (point.size || strokeWidth) / 2, 
-          0, 
-          Math.PI * 2
-        );
-        ctx.fill();
-        ctx.restore();
-        return;
-      }
-      
-      // Se temos um ponto anterior para este cliente, desenhar linha
-      const clientId = point.clientId || 'default';
-      const lastPoint = lastClientPointsRef.current[clientId] as Point;
-      
-      if (lastPoint && !point.isStartOfLine) {
-        // Desenhar uma linha conectando o último ponto a este
-        ctx.save();
-        ctx.strokeStyle = point.color || strokeColor;
-        ctx.lineWidth = point.size || strokeWidth;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        ctx.moveTo(lastPoint.x * rect.width, lastPoint.y * rect.height);
-        ctx.lineTo(point.x * rect.width, point.y * rect.height);
-        ctx.stroke();
-        ctx.restore();
-      }
-      
-      // Atualizar o último ponto para este cliente
-      lastClientPointsRef.current[clientId] = { 
-        x: point.x, 
-        y: point.y 
-      } as Point;
-    });
-    
-    // Também enviar para o processador otimizado em lote para linhas suaves
-    processReceivedPoints(receivedPoints);
   }, [receivedPoints, isDrawer, processReceivedPoints, strokeColor, strokeWidth]);
   
   // Limpar timer de renderização ao desmontar

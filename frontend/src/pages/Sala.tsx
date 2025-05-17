@@ -174,101 +174,142 @@ function Sala() {
 
     // Efeito para processar o estado inicial da sala quando ele é recebido
     const handleRoomState = (state: any) => {
+      if (!state) {
+        console.error('[ERRO] Estado da sala recebido é nulo ou indefinido');
+        return;
+      }
+      
       console.log('[ESTADO] Estado da sala recebido:', state);
-      setPlayers(state.players || []);
-      setDrawerId(state.drawerId || null);
-
-      // Garantir que round e maxRounds sejam números válidos
-      const currentRound = Number(state.round) || 1;
-      const totalRounds = Number(state.maxRounds) || 3;
-
-      console.log(`[ESTADO] Atualizando rodada: ${currentRound}/${totalRounds}`);
       
-      // Verificar se o valor de maxRounds é consistente
-      if (maxRounds !== totalRounds && totalRounds > 0) {
-        console.log(`[CORREÇÃO] Atualizando máximo de rodadas: ${maxRounds} -> ${totalRounds}`);
-        setMaxRounds(totalRounds);
-      }
-      
-      // Verificar inconsistências em round
-      if (currentRound > totalRounds) {
-        console.log(`[ALERTA] Rodada atual (${currentRound}) maior que o máximo (${totalRounds})`);
+      // Tratar estado da sala de forma defensiva
+      try {
+        // Atualizar jogadores se presente
+        if (Array.isArray(state.players)) {
+          setPlayers(state.players);
+        }
         
-        // Se o jogo ainda está ativo mas a rodada excedeu o máximo, talvez devamos mostrar o pódio
-        if (state.status === 'playing' && podium === null) {
-          console.log('[CORREÇÃO] Rodada excedeu o máximo, mas pódio não está visível');
-          // Dar um tempo para o servidor enviar o pódio
-          setTimeout(() => {
-            if (podium === null && isGameStarted) {
-              console.log('[CORREÇÃO] Forçando exibição do pódio devido a inconsistência de rodada');
-              const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
-              setPodium(sortedPlayers);
-              setIsGameStarted(false);
+        // Atualizar desenhista se presente
+        if (state.drawerId !== undefined) {
+          setDrawerId(state.drawerId);
+        }
+
+        // Garantir que round e maxRounds sejam números válidos
+        const currentRound = Number(state.round) || 1;
+        const totalRounds = Number(state.maxRounds) || 3;
+
+        console.log(`[ESTADO] Atualizando rodada: ${currentRound}/${totalRounds}`);
+        
+        // Verificar se o valor de maxRounds é consistente - só atualizar se for válido
+        if (totalRounds > 0 && totalRounds !== maxRounds) {
+          console.log(`[CORREÇÃO] Atualizando máximo de rodadas: ${maxRounds} -> ${totalRounds}`);
+          setMaxRounds(totalRounds);
+        }
+        
+        // Verificar inconsistências em round
+        if (currentRound > 0) {
+          if (currentRound > totalRounds) {
+            console.log(`[ALERTA] Rodada atual (${currentRound}) maior que o máximo (${totalRounds})`);
+            
+            // Se o jogo ainda está ativo mas a rodada excedeu o máximo, talvez devamos mostrar o pódio
+            if (state.status === 'playing' && podium === null) {
+              console.log('[CORREÇÃO] Rodada excedeu o máximo, mas pódio não está visível');
+              
+              // Verificar se podemos mostrar o pódio
+              if (Array.isArray(state.players) && state.players.length > 0) {
+                setTimeout(() => {
+                  // Verificar novamente se o podium ainda não foi definido
+                  if (podium === null && isGameStarted) {
+                    console.log('[CORREÇÃO] Forçando exibição do pódio devido a inconsistência de rodada');
+                    const sortedPlayers = [...state.players].sort((a, b) => b.score - a.score);
+                    setPodium(sortedPlayers);
+                    setIsGameStarted(false);
+                  }
+                }, 2000);
+              }
             }
-          }, 2000);
+          } else {
+            // Definir a rodada apenas se for um valor válido
+            setRound(currentRound);
+          }
         }
-      } else {
-        // Definir a rodada apenas se for um valor válido
-        setRound(currentRound);
-      }
-      
-      // Se o estado inclui um pódio, mostrar isso
-      if (state.status === 'gameEnded' || state.podium) {
-        console.log('[ESTADO] Jogo encerrado detectado no estado');
-        const sortedPlayers = [...(state.podium || state.players || [])].sort((a, b) => b.score - a.score);
-        setPodium(sortedPlayers);
-        setIsGameStarted(false);
-      } else {
-        setIsGameStarted(state.status === 'playing');
-        // Remover pódio se o jogo estiver em andamento
-        if (state.status === 'playing' && podium !== null) {
-          console.log('[CORREÇÃO] Removendo pódio durante jogo ativo');
-          setPodium(null);
-        }
-      }
-      
-      // Atualizar palavra apenas se for o desenhista
-      if (state.drawerId === socket.id) {
-        setIsDrawer(true);
-        setWord(state.word || null);
-        console.log('[ESTADO] Definido como desenhista com palavra:', state.word);
-      } else {
-        setIsDrawer(false);
-        setWord(null);
-        console.log('[ESTADO] Definido como não-desenhista');
-      }
-      
-      // Sincronizar linhas e pontos apenas se não for o desenhista atual
-      if (state.drawerId !== socket.id) {
-        setLines(state.lines || []);
         
-        // Limpar e recriar os pontos recebidos
-        setReceivedPoints([]);
-        // Se existem pontos no estado da sala, processá-los depois de um breve delay
-        // para garantir que o canvas está pronto
-        if (state.points && state.points.length > 0) {
-          setTimeout(() => {
-            setReceivedPoints(state.points);
-          }, 100);
+        // Processar status do jogo
+        const gameStatus = state.status || 'waiting';
+        const gameStarted = gameStatus === 'playing';
+        
+        // Se o estado inclui um pódio, mostrar isso
+        if (gameStatus === 'gameEnded' || gameStatus === 'finished' || state.podium) {
+          console.log('[ESTADO] Jogo encerrado detectado no estado');
+          
+          // Determinar jogadores para o pódio
+          let podiumPlayers = state.podium || state.players || [];
+          if (Array.isArray(podiumPlayers) && podiumPlayers.length > 0) {
+            const sortedPlayers = [...podiumPlayers].sort((a, b) => b.score - a.score);
+            setPodium(sortedPlayers);
+            setIsGameStarted(false);
+          }
+        } else {
+          // Atualizar estado do jogo
+          setIsGameStarted(gameStarted);
+          
+          // Remover pódio se o jogo estiver em andamento
+          if (gameStarted && podium !== null) {
+            console.log('[CORREÇÃO] Removendo pódio durante jogo ativo');
+            setPodium(null);
+          }
         }
+        
+        // Atualizar palavra apenas se for o desenhista
+        if (state.drawerId === socket.id) {
+          setIsDrawer(true);
+          setWord(state.word || null);
+          console.log('[ESTADO] Definido como desenhista com palavra:', state.word);
+        } else {
+          setIsDrawer(false);
+          setWord(null);
+          console.log('[ESTADO] Definido como não-desenhista');
+        }
+        
+        // Sincronizar linhas e pontos apenas se não for o desenhista atual
+        if (state.drawerId !== socket.id) {
+          // Atualizar linhas se presentes
+          if (Array.isArray(state.lines)) {
+            setLines(state.lines);
+          }
+          
+          // Processar pontos com segurança
+          setReceivedPoints([]);
+          
+          // Se existem pontos no estado da sala, processá-los depois de um breve delay
+          if (Array.isArray(state.points) && state.points.length > 0) {
+            setTimeout(() => {
+              setReceivedPoints(state.points);
+            }, 200); // Aumentar delay para garantir que o canvas esteja pronto
+          }
+        }
+        
+        // Atualizar timer apenas se for um número válido
+        if (typeof state.timer === 'number' && !isNaN(state.timer)) {
+          setTimer(state.timer);
+        }
+        
+        // Verificar estado do pódio explicitamente
+        if (state.podium && Array.isArray(state.podium) && state.podium.length > 0) {
+          console.log('[ESTADO] Definindo pódio a partir do estado da sala');
+          setPodium(state.podium);
+        }
+        
+        // Log completo do estado processado
+        console.log('[DIAGNÓSTICO] Estado da sala processado:',
+          `jogadores=${state.players?.length || 0}`,
+          `desenhista=${state.drawerId?.substring(0, 5) || 'nenhum'}`,
+          `rodada=${currentRound}/${totalRounds}`,
+          `status=${state.status}`,
+          `pódio=${state.podium ? 'sim' : 'não'}`
+        );
+      } catch (error) {
+        console.error('[ERRO] Erro ao processar estado da sala:', error);
       }
-      
-      setTimer(state.timer || 0);
-      
-      // Verificar estado do pódio
-      if (state.podium) {
-        console.log('[ESTADO] Definindo pódio a partir do estado da sala');
-        setPodium(state.podium);
-      }
-      
-      // Log completo do estado processado
-      console.log('[DIAGNÓSTICO] Estado da sala processado:',
-        `jogadores=${state.players?.length || 0}`,
-        `desenhista=${state.drawerId?.substring(0, 5) || 'nenhum'}`,
-        `rodada=${currentRound}/${totalRounds}`,
-        `status=${state.status}`,
-        `pódio=${state.podium ? 'sim' : 'não'}`
-      );
     };
 
     // Receber estado completo da sala
@@ -864,63 +905,88 @@ function Sala() {
 
     // Efeito para configurar eventos de desenho
     useEffect(() => {
+      if (!roomCode) return;
+      
       const socket = socketService.getSocket();
       
       // Manipulador para pontos de desenho individuais
       const handleDrawPointEvent = (data: any) => {
-        // Adicionar timestamp se não existir
-        const pointWithTime = {
-          ...data,
-          timestamp: data.timestamp || Date.now()
-        };
+        if (!data) return;
         
-        // Se for um comando de limpeza, limpar tudo
-        if (data.isClearCanvas) {
-          console.log('Limpeza de canvas solicitada por:', data.clientId);
-          setReceivedPoints([]);
-          setPoints([]);
-          return;
-        }
-        
-        // Se o ponto é do próprio cliente e é o desenhista, ignorar (já foi processado localmente)
-        if (data.clientId === socket.id && isDrawer) {
-          return;
-        }
-        
-        // Log para diagnóstico se as coordenadas forem suspeitamente zeradas
-        if (data.x === 0 && data.y === 0 && !data.isClearCanvas) {
-          console.warn('Recebido ponto com coordenadas zeradas:', data);
-        }
-        
-        // Adicionar ponto à lista de pontos recebidos para renderização
-        setReceivedPoints(prev => {
-          // Limitar o número de pontos armazenados para evitar problemas de memória
-          const MAX_RECEIVED_POINTS = 1000;
+        try {
+          // Adicionar timestamp se não existir
+          const pointWithTime = {
+            ...data,
+            timestamp: data.timestamp || Date.now()
+          };
           
-          const updated = [...prev, pointWithTime];
-          if (updated.length > MAX_RECEIVED_POINTS) {
-            console.log(`Limitando pontos recebidos de ${updated.length} para ${MAX_RECEIVED_POINTS}`);
-            return updated.slice(-MAX_RECEIVED_POINTS);
+          // Se for um comando de limpeza, limpar tudo
+          if (data.isClearCanvas) {
+            console.log('Limpeza de canvas solicitada por:', data.clientId);
+            setReceivedPoints([]);
+            setPoints([]);
+            return;
           }
-          return updated;
-        });
+          
+          // Se o ponto é do próprio cliente e é o desenhista, ignorar (já foi processado localmente)
+          if (data.clientId === socket.id && isDrawer) {
+            return;
+          }
+          
+          // Garantir que as coordenadas sejam números válidos
+          if (typeof data.x !== 'number' || typeof data.y !== 'number' || 
+              isNaN(data.x) || isNaN(data.y)) {
+            console.warn('Ponto com coordenadas inválidas:', data);
+            return;
+          }
+          
+          // Log para diagnóstico se as coordenadas forem suspeitamente zeradas
+          if (data.x === 0 && data.y === 0 && !data.isClearCanvas) {
+            console.warn('Recebido ponto com coordenadas zeradas:', data);
+          }
+          
+          // Adicionar ponto à lista de pontos recebidos para renderização
+          setReceivedPoints(prev => {
+            // Verificar se o estado anterior é válido
+            if (!Array.isArray(prev)) {
+              console.warn('Estado anterior de pontos não é um array:', prev);
+              return [pointWithTime];
+            }
+            
+            // Limitar o número de pontos armazenados para evitar problemas de memória
+            const MAX_RECEIVED_POINTS = 1000;
+            
+            const updated = [...prev, pointWithTime];
+            if (updated.length > MAX_RECEIVED_POINTS) {
+              console.log(`Limitando pontos recebidos de ${updated.length} para ${MAX_RECEIVED_POINTS}`);
+              return updated.slice(-MAX_RECEIVED_POINTS);
+            }
+            return updated;
+          });
+        } catch (error) {
+          console.error('Erro ao processar ponto recebido:', error);
+        }
       };
       
       // Manipulador para limpeza de canvas
       const handleClearCanvasEvent = () => {
-        console.log('Solicitação explícita de limpeza de canvas recebida');
-        setReceivedPoints([]);
-        setPoints([]);
-        
-        // Enviar ponto especial de limpeza para garantir que o DrawingCanvas processe
-        const clearPoint = { 
-          x: 0, 
-          y: 0, 
-          clientId: 'server', 
-          isClearCanvas: true,
-          timestamp: Date.now()
-        };
-        setReceivedPoints([clearPoint]);
+        try {
+          console.log('Solicitação explícita de limpeza de canvas recebida');
+          setReceivedPoints([]);
+          setPoints([]);
+          
+          // Enviar ponto especial de limpeza para garantir que o DrawingCanvas processe
+          const clearPoint = { 
+            x: 0, 
+            y: 0, 
+            clientId: 'server', 
+            isClearCanvas: true,
+            timestamp: Date.now()
+          };
+          setReceivedPoints([clearPoint]);
+        } catch (error) {
+          console.error('Erro ao processar comando de limpeza de canvas:', error);
+        }
       };
       
       // Eventos de desenho
