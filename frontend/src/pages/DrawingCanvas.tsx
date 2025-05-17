@@ -13,6 +13,7 @@ interface Point {
   clientId?: string;
   isSinglePoint?: boolean;
   isClearCanvas?: boolean;
+  timestamp?: number;
 }
 
 interface Props {
@@ -77,28 +78,21 @@ const DrawingCanvas: React.FC<Props> = ({
       return;
     }
 
-    // Configuração para canvas de alta resolução
+    // Garantir que o canvas tenha tamanho específico e consistente
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
     
-    // Verificar se as dimensões são válidas
-    if (rect.width === 0 || rect.height === 0) {
-      console.error('Canvas com dimensões inválidas:', rect);
-      // Forçar dimensões mínimas
-      canvas.width = 500 * dpr;
-      canvas.height = 350 * dpr;
-    } else {
-      console.log('Dimensões do canvas:', { 
-        width: rect.width, 
-        height: rect.height,
-        dpr,
-        canvasWidth: rect.width * dpr,
-        canvasHeight: rect.height * dpr
-      });
-      
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-    }
+    // Definir dimensões fixas para o canvas para garantir consistência
+    const CANVAS_WIDTH = 800;
+    const CANVAS_HEIGHT = 600;
+    
+    // Configurar estilos CSS para dimensionar visualmente
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.minHeight = '300px';
+    
+    // Configurar dimensões reais do canvas (buffer interno)
+    canvas.width = CANVAS_WIDTH * dpr;
+    canvas.height = CANVAS_HEIGHT * dpr;
     
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) {
@@ -109,6 +103,10 @@ const DrawingCanvas: React.FC<Props> = ({
     // Escalar o contexto para dispositivos de alta densidade
     ctx.scale(dpr, dpr);
     
+    // Armazenar as dimensões de referência para uso no desenho/recepção
+    canvas.setAttribute('data-width', CANVAS_WIDTH.toString());
+    canvas.setAttribute('data-height', CANVAS_HEIGHT.toString());
+    
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = strokeColor;
@@ -117,29 +115,31 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Limpar o canvas inicialmente
     ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
-    console.log('Canvas inicializado com sucesso');
+    console.log('Canvas inicializado com dimensões internas:', {
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+      dpr,
+      realWidth: canvas.width,
+      realHeight: canvas.height
+    });
     
     // Ajustar tamanho do canvas ao redimensionar
     const handleResize = () => {
       console.log('Redimensionando canvas');
       
-      const newRect = canvas.getBoundingClientRect();
-      canvas.width = newRect.width * dpr;
-      canvas.height = newRect.height * dpr;
-      
+      // Não alteramos as dimensões internas do canvas, apenas garantimos 
+      // que as transformações de escala estejam corretas
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // Resetar transformação
       ctx.scale(dpr, dpr);
+      
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = strokeWidth;
       
-      // Restaurar conteúdo
-      ctx.fillStyle = 'white';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      console.log('Canvas redimensionado:', { width: canvas.width, height: canvas.height });
+      console.log('Canvas redimensionado mantendo as dimensões internas fixas');
     };
     
     window.addEventListener('resize', handleResize);
@@ -148,6 +148,37 @@ const DrawingCanvas: React.FC<Props> = ({
       window.removeEventListener('resize', handleResize);
     };
   }, []);
+
+  // Função para obter as dimensões de referência do canvas
+  const getCanvasDimensions = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { width: 800, height: 600 };
+    
+    // Usar as dimensões de referência armazenadas ou valores padrão
+    const width = parseInt(canvas.getAttribute('data-width') || '800', 10);
+    const height = parseInt(canvas.getAttribute('data-height') || '600', 10);
+    
+    return { width, height };
+  }, []);
+  
+  // Atualizar função de normalização de pontos de desenho
+  const normalizePoint = useCallback((clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    
+    const rect = canvas.getBoundingClientRect();
+    const refDimensions = getCanvasDimensions();
+    
+    // Converter para coordenadas dentro do canvas
+    const canvasX = clientX - rect.left;
+    const canvasY = clientY - rect.top;
+    
+    // Normalizar usando as dimensões visuais atuais
+    const x = canvasX / rect.width;
+    const y = canvasY / rect.height;
+    
+    return { x, y };
+  }, [getCanvasDimensions]);
 
   // Atualizar o contexto quando as cores ou espessuras mudam
   useEffect(() => {
@@ -202,124 +233,113 @@ const DrawingCanvas: React.FC<Props> = ({
 
   // Processamento otimizado dos pontos recebidos
   const processReceivedPoints = useCallback((points: Point[]) => {
-    if (!points || points.length === 0 || isDrawer) return;
+    if (!points || points.length === 0) return;
     
-    const ctx = contextRef.current;
     const canvas = canvasRef.current;
-    if (!ctx || !canvas) return;
-    
-    // Garantir que o canvas esteja visível
-    canvas.style.display = 'block';
-    
-    // Limitar a taxa de renderização para evitar sobrecarga
-    const now = performance.now();
-    const timeSinceLastRender = now - lastRenderTimeRef.current;
-    
-    // Acumular pontos para processamento em lote
-    pendingPointsRef.current.push(...points);
-    
-    // Se já temos um timer de renderização agendado, não criar outro
-    if (renderTimerRef.current) return;
-    
-    // Se passamos do limite de tempo ou temos muitos pontos pendentes, renderizar agora
-    if (timeSinceLastRender > 30 || pendingPointsRef.current.length > 50) {
-      renderPointsBatch();
-    } else {
-      // Agendar renderização para mais tarde (tempo reduzido para melhor resposta)
-      renderTimerRef.current = setTimeout(renderPointsBatch, 20);
-    }
-  }, [isDrawer]);
-  
-  // Renderizar lote de pontos com otimização
-  const renderPointsBatch = useCallback(() => {
-    if (renderTimerRef.current) {
-      clearTimeout(renderTimerRef.current);
-      renderTimerRef.current = null;
+    if (!canvas) {
+      console.error('Canvas não encontrado para processar pontos recebidos');
+      return;
     }
     
-    if (pendingPointsRef.current.length === 0) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      console.error('Contexto 2D não disponível para processar pontos');
+      return;
+    }
     
-    const ctx = contextRef.current;
-    const canvas = canvasRef.current;
-    if (!ctx || !canvas) return;
+    console.log(`Processando ${points.length} pontos recebidos para renderização`);
     
-    const rect = canvas.getBoundingClientRect();
+    // Verificar se há um comando de limpeza
+    if (points.some(p => p.isClearCanvas === true)) {
+      console.log('Comando de limpeza detectado, limpando canvas');
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    
+    // Usar dimensões de referência para garantir consistência
+    const dimensions = getCanvasDimensions();
+    console.log('Dimensões de referência para renderização:', dimensions);
+    
+    // Agrupar pontos por cliente para desenhar por linhas contínuas
     const pointsByClient: {[key: string]: Point[]} = {};
     
-    // Log para depuração
-    console.log(`Renderizando lote de ${pendingPointsRef.current.length} pontos`);
-    
-    // Agrupar pontos por cliente para desenhar linhas contínuas
-    pendingPointsRef.current.forEach(point => {
-      // Se é um comando de limpeza, processar e retornar
-      if (point.isClearCanvas || point.o === 2) { // 2 = código para limpeza
-        console.log('Comando de limpeza detectado, limpando canvas');
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        lastClientPointsRef.current = {}; // Resetar pontos armazenados
-        return;
-      }
-      
+    // Agrupar pontos por clientId para garantir continuidade das linhas
+    points.forEach(point => {
       const clientId = point.clientId || 'default';
-      
-      // Verificar se é um ponto único (clique sem movimento)
-      const isSinglePoint = point.isSinglePoint || point.o === 1;
-      
-      if (isSinglePoint) {
-        // Desenhar ponto único diretamente
-        console.log('Renderizando ponto único:', point);
-        ctx.save();
-        ctx.fillStyle = point.color || strokeColor;
-        ctx.beginPath();
-        ctx.arc(
-          (point.x || 0) * rect.width, 
-          (point.y || 0) * rect.height, 
-          ((point.size || point.p || strokeWidth) / 2), 
-          0, 
-          Math.PI * 2
-        );
-        ctx.fill();
-        ctx.restore();
-        return;
-      }
-      
-      // Verificar se precisamos iniciar uma nova linha para este cliente
-      const isStartOfLine = point.isStartOfLine || point.s === 1;
-      
       if (!pointsByClient[clientId]) {
         pointsByClient[clientId] = [];
       }
-      
-      // Se é começo de nova linha, processar a linha atual e começar nova
-      if (isStartOfLine && pointsByClient[clientId].length > 0) {
-        // Desenhar a linha atual antes de começar nova
-        const linePoints = pointsByClient[clientId];
-        drawPath(ctx, linePoints, point.color || strokeColor, point.size || strokeWidth, rect);
-        pointsByClient[clientId] = []; // Iniciar nova linha
-      }
-      
-      // Adicionar o ponto atual à linha do cliente
       pointsByClient[clientId].push(point);
     });
     
-    // Desenhar as linhas acumuladas por cliente
+    // Desenhar linhas por cliente
     Object.keys(pointsByClient).forEach(clientId => {
-      const linePoints = pointsByClient[clientId];
-      if (linePoints.length > 0) {
-        const firstPoint = linePoints[0];
-        drawPath(ctx, linePoints, firstPoint.color || strokeColor, firstPoint.size || strokeWidth, rect);
+      const clientPoints = pointsByClient[clientId];
+      const sortedPoints = clientPoints.sort((a, b) => 
+        (a.timestamp || 0) - (b.timestamp || 0)
+      );
+      
+      // Desenhar cada segmento de linha
+      if (sortedPoints.length > 0) {
+        let startNewLine = true;
         
-        // Armazenar o último ponto desta linha para o cliente
-        if (linePoints.length > 0) {
-          lastClientPointsRef.current[clientId] = linePoints[linePoints.length - 1];
-        }
+        sortedPoints.forEach(point => {
+          if (point.isStartOfLine || point.s === 1) {
+            startNewLine = true;
+          }
+          
+          // Desenhar ponto único se for o caso
+          if (point.isSinglePoint || point.o === 1) {
+            const x = point.x * dimensions.width;
+            const y = point.y * dimensions.height;
+            
+            ctx.save();
+            ctx.fillStyle = point.color || strokeColor;
+            ctx.beginPath();
+            ctx.arc(x, y, (point.size || strokeWidth) / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            return;
+          }
+          
+          // Continuar a linha se não for início
+          if (!startNewLine) {
+            const prevPoint = lastClientPointsRef.current[clientId];
+            if (prevPoint) {
+              // Desenhar linha para o canvas
+              ctx.save();
+              ctx.strokeStyle = point.color || strokeColor;
+              ctx.lineWidth = point.size || strokeWidth;
+              ctx.lineCap = 'round';
+              ctx.lineJoin = 'round';
+              ctx.beginPath();
+              
+              // Usar coordenadas usando dimensões de referência
+              const fromX = prevPoint.x * dimensions.width;
+              const fromY = prevPoint.y * dimensions.height;
+              const toX = point.x * dimensions.width;
+              const toY = point.y * dimensions.height;
+              
+              // Log para depuração apenas se as coordenadas forem suspeitas
+              if (point.x === 0 && point.y === 0) {
+                console.warn('Ponto zerado detectado, possível problema de coordenadas');
+              }
+              
+              ctx.moveTo(fromX, fromY);
+              ctx.lineTo(toX, toY);
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
+          
+          // Atualizar último ponto deste cliente
+          lastClientPointsRef.current[clientId] = { ...point };
+          startNewLine = false;
+        });
       }
     });
-    
-    // Limpar os pontos processados
-    pendingPointsRef.current = [];
-    lastRenderTimeRef.current = performance.now();
-  }, [strokeColor, strokeWidth]);
+  }, [strokeColor, strokeWidth, getCanvasDimensions]);
   
   // Função otimizada para desenhar um caminho a partir de pontos
   const drawPath = useCallback((ctx: CanvasRenderingContext2D, points: Point[], color: string, width: number, rect: DOMRect) => {
@@ -332,41 +352,38 @@ const DrawingCanvas: React.FC<Props> = ({
     ctx.lineJoin = 'round';
     ctx.beginPath();
     
-    // Iniciar no primeiro ponto
-    ctx.moveTo(
-      (points[0].x || 0) * rect.width, 
-      (points[0].y || 0) * rect.height
-    );
+    // Iniciar no primeiro ponto com coordenadas inteiras
+    const startX = Math.floor((points[0].x || 0) * rect.width);
+    const startY = Math.floor((points[0].y || 0) * rect.height);
+    ctx.moveTo(startX, startY);
     
     // Para desenhos simples, usar lineTo para cada ponto em vez de curvas
     if (points.length < 5) {
       // Com poucos pontos, conectar diretamente para mais precisão
       for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(
-          (points[i].x || 0) * rect.width, 
-          (points[i].y || 0) * rect.height
-        );
+        const x = Math.floor((points[i].x || 0) * rect.width);
+        const y = Math.floor((points[i].y || 0) * rect.height);
+        ctx.lineTo(x, y);
       }
     } else {
-      // Com muitos pontos, usar curva suave para performance
+      // Com muitos pontos, usar curva suave para melhor aparência
+      // Usar coordenadas inteiras para melhor performance
       for (let i = 1; i < points.length; i++) {
-        const xc = ((points[i].x || 0) + (points[i-1].x || 0)) / 2 * rect.width;
-        const yc = ((points[i].y || 0) + (points[i-1].y || 0)) / 2 * rect.height;
+        const currX = Math.floor((points[i].x || 0) * rect.width);
+        const currY = Math.floor((points[i].y || 0) * rect.height);
+        const prevX = Math.floor((points[i-1].x || 0) * rect.width);
+        const prevY = Math.floor((points[i-1].y || 0) * rect.height);
+        
+        // Calcular ponto médio
+        const xc = Math.floor((currX + prevX) / 2);
+        const yc = Math.floor((currY + prevY) / 2);
         
         // Usar curva quadrática para suavizar a linha
         if (i < points.length - 1) {
-          ctx.quadraticCurveTo(
-            (points[i-1].x || 0) * rect.width, 
-            (points[i-1].y || 0) * rect.height,
-            xc, 
-            yc
-          );
+          ctx.quadraticCurveTo(prevX, prevY, xc, yc);
         } else {
           // Para o último ponto, desenhar até ele diretamente
-          ctx.lineTo(
-            (points[i].x || 0) * rect.width, 
-            (points[i].y || 0) * rect.height
-          );
+          ctx.lineTo(currX, currY);
         }
       }
     }
@@ -473,8 +490,11 @@ const DrawingCanvas: React.FC<Props> = ({
     
     console.log('Limpando canvas');
     
+    // Usar dimensões de referência para limpar corretamente
+    const dimensions = getCanvasDimensions();
+    
     ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, dimensions.width, dimensions.height);
     
     // Restaurar configurações padrão
     ctx.lineCap = 'round';
@@ -482,6 +502,7 @@ const DrawingCanvas: React.FC<Props> = ({
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = strokeWidth;
     
+    // Limpar referências de pontos
     lastPointRef.current = null;
     pointsBufferRef.current = [];
     lastClientPointsRef.current = {};
@@ -489,8 +510,8 @@ const DrawingCanvas: React.FC<Props> = ({
     // Notificar a sala sobre a limpeza
     onClear?.();
     
-    console.log('Canvas limpo com sucesso');
-  }, [onClear, strokeColor, strokeWidth]);
+    console.log('Canvas limpo com sucesso usando dimensões:', dimensions);
+  }, [onClear, strokeColor, strokeWidth, getCanvasDimensions]);
 
   // Event handler para iniciar desenho
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -513,10 +534,8 @@ const DrawingCanvas: React.FC<Props> = ({
     isDrawingRef.current = true;
     setTouchActive(true);
     
-    // Obter coordenadas normalizadas (0-1)
-    const rect = canvas!.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
+    // Obter coordenadas normalizadas
+    const { x, y } = normalizePoint(e.clientX, e.clientY);
     
     // Iniciar nova linha
     const newPoint = { x, y, pressure: e.pressure || 0.5 };
@@ -526,11 +545,22 @@ const DrawingCanvas: React.FC<Props> = ({
     // Desenhar um ponto único no caso de clique sem movimento
     const ctx = contextRef.current;
     if (ctx) {
-      console.log('Desenhando ponto único');
+      const dimensions = getCanvasDimensions();
+      console.log('Desenhando ponto único em:', {
+        x: x * dimensions.width,
+        y: y * dimensions.height
+      });
+      
       ctx.save();
       ctx.fillStyle = strokeColor;
       ctx.beginPath();
-      ctx.arc(x * rect.width, y * rect.height, strokeWidth / 2, 0, Math.PI * 2);
+      ctx.arc(
+        x * dimensions.width, 
+        y * dimensions.height, 
+        strokeWidth / 2, 
+        0, 
+        Math.PI * 2
+      );
       ctx.fill();
       ctx.restore();
     }
@@ -540,7 +570,7 @@ const DrawingCanvas: React.FC<Props> = ({
     
     // Notificar ponto
     onDraw?.(newPoint);
-  }, [isDrawer, onStartLine, onDraw, strokeColor, strokeWidth]);
+  }, [isDrawer, onStartLine, onDraw, strokeColor, strokeWidth, normalizePoint, getCanvasDimensions]);
 
   // Event handler para desenhar durante movimento do ponteiro
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
@@ -559,10 +589,8 @@ const DrawingCanvas: React.FC<Props> = ({
     const ctx = contextRef.current;
     if (!ctx) return;
     
-    // Obter coordenadas normalizadas (0-1)
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
+    // Obter coordenadas normalizadas usando a nova função
+    const { x, y } = normalizePoint(e.clientX, e.clientY);
     
     // Verificar limites para evitar desenho fora do canvas
     if (x < 0 || x > 1 || y < 0 || y > 1) {
@@ -574,17 +602,33 @@ const DrawingCanvas: React.FC<Props> = ({
     const lastPoint = lastPointRef.current;
     
     if (lastPoint) {
-      // Desenhar linha do último ponto até o atual
-      drawLine(ctx, lastPoint, newPoint, strokeColor, strokeWidth);
+      // Obter dimensões de referência consistentes
+      const dimensions = getCanvasDimensions();
       
-      // Notificar servidor sobre o novo ponto
+      // Desenhar linha do último ponto até o atual
+      ctx.save();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = strokeWidth;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      
+      // Converter pontos normalizados para coordenadas de pixel consistentes
+      ctx.moveTo(lastPoint.x * dimensions.width, lastPoint.y * dimensions.height);
+      ctx.lineTo(x * dimensions.width, y * dimensions.height);
+      ctx.stroke();
+      ctx.restore();
+      
+      // Adicionar ao buffer para enviar em lote depois
+      pointsBufferRef.current.push(newPoint);
+      
+      // Enviar para a sala
       onDraw?.(newPoint);
     }
     
     // Atualizar último ponto
     lastPointRef.current = newPoint;
-    pointsBufferRef.current.push(newPoint);
-  }, [isDrawer, strokeColor, strokeWidth, onDraw, drawLine]);
+  }, [isDrawer, strokeColor, strokeWidth, onDraw, normalizePoint, getCanvasDimensions]);
 
   // Event handler para finalizar desenho
   const handlePointerUp = useCallback((e: React.PointerEvent) => {

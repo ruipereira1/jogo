@@ -10,6 +10,8 @@ interface Player {
   score: number;
   isHost: boolean;
   online?: boolean;
+  playerId: string; // Alterado de opcional para obrigatório
+  reconnectTimeLeft?: number;
 }
 
 // Declare interface para window global
@@ -72,7 +74,7 @@ function Sala() {
   const [isHost, setIsHost] = useState(false);
   const [points, setPoints] = useState<Array<{x: number, y: number, color?: string, width?: number}>>([]);
   const [receivedPoints, setReceivedPoints] = useState<any[]>([]);
-  const lastStateRequestRef = useRef<number>(0); // Novo ref para throttling de solicitações de estado
+  const lastStateRequestRef = useRef<number>(0); // Ref para throttling de solicitações de estado
 
   // Ref para garantir valor atualizado de drawing
   const drawingRef = useRef(false);
@@ -82,44 +84,42 @@ function Sala() {
   // Detectar tipo de dispositivo para ajustes de UI
   const [deviceType, setDeviceType] = useState<'mobile'|'tablet'|'desktop'>('desktop');
   
-  // Useeffect para detectar o tipo de dispositivo
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 640) {
-        setDeviceType('mobile');
-      } else if (window.innerWidth < 1024) {
-        setDeviceType('tablet');
-      } else {
-        setDeviceType('desktop');
-      }
-    };
-    
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('orientationchange', handleResize);
-    };
-  }, []);
-
-  let canvasWidth, canvasHeight;
-  if (window.innerWidth < 640) { // Mobile
-    canvasWidth = window.innerWidth;
-    // Altura máxima: 70% da altura do ecrã, mas nunca maior que a largura * 0.66
-    const maxCanvasHeight = Math.floor(window.innerHeight * 0.7);
-    const idealHeight = Math.floor(canvasWidth * 0.66);
-    canvasHeight = Math.min(idealHeight, maxCanvasHeight);
-  } else if (window.innerWidth < 1024) { // Tablet
-    canvasWidth = Math.floor(window.innerWidth * 0.8);
-    canvasHeight = Math.floor(canvasWidth * 0.66);
-  } else { // Desktop
-    canvasWidth = 500;
-    canvasHeight = 350;
-  }
+  // Novo estado para jogadores reconectados
+  const [playerReconnected, setPlayerReconnected] = useState<{name: string, timeDisconnected: number} | null>(null);
+  // Mapa para controlar tempos de reconexão
+  const [reconnectTimeouts, setReconnectTimeouts] = useState<{[key: string]: number}>({});
 
   const lastPointsByClientRef = useRef<{[key: string]: {x: number, y: number} | null}>({});
   const lastPointTimerRef = useRef<number | null>(null);
+
+  // Criar um sistema mais robusto para gerenciar notificações
+  const [notifications, setNotifications] = useState<{
+    id: string;
+    type: 'join' | 'leave' | 'reconnect' | 'drawer-left' | 'host-left';
+    message: string;
+    timestamp: number;
+  }[]>([]);
+
+  // Função para adicionar notificação de forma centralizada
+  const addNotification = useCallback((type: 'join' | 'leave' | 'reconnect' | 'drawer-left' | 'host-left', message: string) => {
+    const id = `${type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    
+    setNotifications(prev => {
+      // Limitar a 3 notificações visíveis ao mesmo tempo (as mais recentes)
+      const filtered = [...prev, { id, type, message, timestamp: Date.now() }];
+      if (filtered.length > 3) {
+        return filtered.slice(filtered.length - 3);
+      }
+      return filtered;
+    });
+    
+    // Remover a notificação após um tempo
+    const timeout = type === 'drawer-left' || type === 'host-left' ? 5000 : 4000;
+    
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, timeout);
+  }, []);
 
   // Função para enviar lotes de pontos com throttling
   const sendPointsBatch = useCallback(() => {
@@ -277,16 +277,14 @@ function Sala() {
     // Ouvir eventos do socket
     socket.on('player-joined', ({ players, playerName }) => {
       setPlayers(players);
-      setLastJoined(playerName);
-      setTimeout(() => setLastJoined(null), 3000);
+      addNotification('join', `${playerName} entrou na sala!`);
       // Garantir sincronização total (com throttling):
       requestRoomStateThrottled();
     });
 
     socket.on('player-left', ({ players, playerName }) => {
       setPlayers(players);
-      setLastLeft(playerName);
-      setTimeout(() => setLastLeft(null), 3000);
+      addNotification('leave', `${playerName} saiu da sala!`);
       // Pedir estado completo da sala para garantir sincronização (com throttling)
       requestRoomStateThrottled();
     });
@@ -325,14 +323,60 @@ function Sala() {
       }
     });
 
-    socket.on('game-started', () => {
+    // Adicionando listener para evento explícito de atualização de rodada
+    socket.on('round-update', ({ round, maxRounds }) => {
+      console.log(`[EVENTO] Recebido evento round-update: ${round}/${maxRounds}`);
+      
+      if (round !== undefined && maxRounds !== undefined) {
+        // Verificar a validade dos valores
+        const roundNumber = Number(round);
+        const maxRoundsNumber = Number(maxRounds);
+        
+        if (!isNaN(roundNumber) && !isNaN(maxRoundsNumber)) {
+          // Garantir que a rodada nunca seja maior que o máximo
+          if (roundNumber <= maxRoundsNumber) {
+            console.log(`[ROUND-UPDATE] Atualizando para rodada ${roundNumber}/${maxRoundsNumber}`);
+            setRound(roundNumber);
+            setMaxRounds(maxRoundsNumber);
+          } else {
+            console.log(`[ALERTA] Atualização de rodada inválida: ${roundNumber}/${maxRoundsNumber}`);
+          }
+        } else {
+          console.log(`[ERRO] Valores de rodada não numéricos: round=${round}, maxRounds=${maxRounds}`);
+        }
+      }
+    });
+
+    socket.on('game-started', (data) => {
       setIsGameStarted(true);
-      console.log('Jogo iniciado!');
+      console.log('[EVENTO] Jogo iniciado!', data);
+      
+      // Atualizar informações das rodadas se disponíveis nos dados
+      if (data) {
+        if (data.round !== undefined) {
+          console.log(`[GAME-STARTED] Definindo rodada inicial: ${data.round}`);
+          setRound(Number(data.round));
+        }
+        
+        if (data.maxRounds !== undefined) {
+          console.log(`[GAME-STARTED] Definindo total de rodadas: ${data.maxRounds}`);
+          setMaxRounds(Number(data.maxRounds));
+        }
+      }
+      
+      // Limpar canvas e pódio
+      setPodium(null);
+      setReceivedPoints([]);
+      setLines([]);
+      setGuesses([]);
+      
       // Garantir que o estado seja atualizado imediatamente
       setTimeout(() => {
-        console.log('Verificando estado do jogo após início:', {isGameStarted: true});
-        // Forçar atualização da tela
-        setIsGameStarted(prevState => prevState);
+        console.log('Verificando estado do jogo após início:', {
+          isGameStarted: true,
+          round,
+          maxRounds
+        });
       }, 100);
 
       // Verificar se o evento round-start vai ser chamado ou se precisamos fazer a transição manualmente
@@ -618,14 +662,42 @@ function Sala() {
       }, 1000);
     });
 
-    socket.on('game-restarted', () => {
+    socket.on('game-restarted', (data) => {
+      console.log('[EVENTO] Jogo reiniciado:', data);
+      
+      // Limpar estado do jogo
       setPodium(null);
       setRoundEnded(false);
       setCountdown(null);
       setTimer(0);
       setWinnerName(null);
       setGuesses([]);
-      setIsGameStarted(false);
+      
+      // Atualizar jogadores se recebidos do backend
+      if (data?.players) {
+        setPlayers(data.players);
+      }
+      
+      // Atualizar informações das rodadas
+      if (data?.round !== undefined) {
+        setRound(Number(data.round));
+        console.log(`[GAME-RESTARTED] Rodada definida para ${data.round}`);
+      }
+      
+      if (data?.maxRounds !== undefined) {
+        setMaxRounds(Number(data.maxRounds));
+        console.log(`[GAME-RESTARTED] Total de rodadas definido para ${data.maxRounds}`);
+      }
+      
+      // Mudar para o estado de jogo ativo
+      setIsGameStarted(true);
+      
+      // Limpar canvas e pontos
+      setReceivedPoints([]);
+      setLines([]);
+      setPoints([]);
+      
+      console.log('[GAME-RESTARTED] Estado do jogo resetado e pronto para recomeçar');
     });
 
     socket.on('player-offline', ({ players }) => {
@@ -673,22 +745,44 @@ function Sala() {
 
     // Atualizar o ouvinte original de draw-point para ser compatível com o batching
     socket.on('draw-point', (data) => {
-      console.log('SALA recebendo draw-point:', data);
-      
       // Apenas espectadores devem processar os pontos recebidos
       if (isDrawer) return;
       
-      // Adicionar o ponto ao array de pontos recebidos
-      setReceivedPoints(prev => {
-        // Limitar o número de pontos armazenados para evitar problemas de performance
-        const maxPoints = 1000;
-        const newPoints = [...prev, data];
-        if (newPoints.length > maxPoints) {
+      // Processar comando de limpeza imediatamente se presente
+      if (data.isClearCanvas) {
+        console.log('Recebido comando para limpar canvas');
+        setReceivedPoints([]);
+        return;
+      }
+      
+      // Otimizar: converter coordenadas para valores normalizados mais precisos
+      // e adicionar flag para indicar se é início de linha
+      if (typeof data.x === 'number' && typeof data.y === 'number') {
+        // Garantir que dados importantes sejam sempre definidos
+        const enhancedPoint = {
+          ...data,
+          x: Math.max(0, Math.min(1, data.x || 0)),
+          y: Math.max(0, Math.min(1, data.y || 0)),
+          color: data.color || strokeColor,
+          size: data.size || strokeWidth,
+          pressure: data.pressure || 0.5
+        };
+        
+        // Adicionar o ponto ao array de pontos recebidos usando técnica de acumulação
+        setReceivedPoints(prev => {
+          // Limitar o número de pontos armazenados para evitar problemas de performance
+          const maxPoints = 1000;
+          const newPoints = [...prev, enhancedPoint]; 
+          
           // Se exceder o limite, manter apenas os mais recentes
-          return newPoints.slice(newPoints.length - maxPoints);
-        }
-        return newPoints;
-      });
+          if (newPoints.length > maxPoints) {
+            return newPoints.slice(newPoints.length - maxPoints);
+          }
+          return newPoints;
+        });
+      } else {
+        console.warn('Recebido ponto de desenho inválido:', data);
+      }
     });
 
     setIsLoading(false);
@@ -701,6 +795,143 @@ function Sala() {
       batchInterval = setInterval(sendPointsBatch, 100); // Enviar lotes a cada 100ms
     }
     */
+
+    // Adicionar manipulador para evento player-offline
+    socket.on('player-offline', (data) => {
+      console.log('Jogador offline:', data);
+      addNotification('leave', `${data.playerName} desconectou-se.`);
+      
+      // Atualizar a lista de jogadores
+      if (data.players) {
+        setPlayers(data.players);
+      }
+      
+      // Guardar informações de timeout para reconexão
+      if (data.players && data.timeoutSeconds) {
+        const newTimeouts: {[key: string]: number} = {};
+        data.players.forEach((player: any) => {
+          if (player.reconnectTimeLeft && player.playerId) {
+            newTimeouts[player.playerId] = player.reconnectTimeLeft;
+          }
+        });
+        setReconnectTimeouts(prev => ({ ...prev, ...newTimeouts }));
+      }
+      
+      // Se era o desenhista, mostrar notificação específica
+      if (data.playerId === drawerId) {
+        addNotification('drawer-left', `⚠️ ${data.playerName} (desenhista) desconectou-se! Aguardando reconexão...`);
+      }
+    });
+    
+    // Adicionar manipulador para atualizações de timeout
+    socket.on('player-timeout-update', (data) => {
+      console.log('Atualização de timeout:', data);
+      
+      // Verificar se o playerId existe
+      if (data.playerId) {
+        // Atualizar o tempo restante no mapa de timeouts
+        setReconnectTimeouts(prev => ({
+          ...prev,
+          [data.playerId]: data.timeLeft
+        }));
+      }
+    });
+    
+    // Adicionar manipulador para reconexão de jogador
+    socket.on('player-reconnected', (data) => {
+      console.log('Jogador reconectado:', data);
+      
+      // Mostrar notificação de reconexão
+      addNotification('reconnect', `${data.playerName} reconectou após ${data.timeDisconnected} segundos!`);
+      
+      // Remover do mapa de timeouts se o playerId existir
+      if (data.playerId) {
+        setReconnectTimeouts(prev => {
+          const newTimeouts = { ...prev };
+          delete newTimeouts[data.playerId];
+          return newTimeouts;
+        });
+      }
+    });
+
+    socket.on('drawer-left', ({ drawerName }) => {
+      addNotification('drawer-left', `⚠️ ${drawerName} (desenhista) desconectou-se!`);
+    });
+
+    socket.on('host-left', ({ newHostName }) => {
+      addNotification('host-left', `${newHostName} é o novo host da sala!`);
+    });
+
+    // Efeito para configurar eventos de desenho
+    useEffect(() => {
+      const socket = socketService.getSocket();
+      
+      // Manipulador para pontos de desenho individuais
+      const handleDrawPointEvent = (data: any) => {
+        // Adicionar timestamp se não existir
+        const pointWithTime = {
+          ...data,
+          timestamp: data.timestamp || Date.now()
+        };
+        
+        // Se for um comando de limpeza, limpar tudo
+        if (data.isClearCanvas) {
+          console.log('Limpeza de canvas solicitada por:', data.clientId);
+          setReceivedPoints([]);
+          setPoints([]);
+          return;
+        }
+        
+        // Se o ponto é do próprio cliente e é o desenhista, ignorar (já foi processado localmente)
+        if (data.clientId === socket.id && isDrawer) {
+          return;
+        }
+        
+        // Log para diagnóstico se as coordenadas forem suspeitamente zeradas
+        if (data.x === 0 && data.y === 0 && !data.isClearCanvas) {
+          console.warn('Recebido ponto com coordenadas zeradas:', data);
+        }
+        
+        // Adicionar ponto à lista de pontos recebidos para renderização
+        setReceivedPoints(prev => {
+          // Limitar o número de pontos armazenados para evitar problemas de memória
+          const MAX_RECEIVED_POINTS = 1000;
+          
+          const updated = [...prev, pointWithTime];
+          if (updated.length > MAX_RECEIVED_POINTS) {
+            console.log(`Limitando pontos recebidos de ${updated.length} para ${MAX_RECEIVED_POINTS}`);
+            return updated.slice(-MAX_RECEIVED_POINTS);
+          }
+          return updated;
+        });
+      };
+      
+      // Manipulador para limpeza de canvas
+      const handleClearCanvasEvent = () => {
+        console.log('Solicitação explícita de limpeza de canvas recebida');
+        setReceivedPoints([]);
+        setPoints([]);
+        
+        // Enviar ponto especial de limpeza para garantir que o DrawingCanvas processe
+        const clearPoint = { 
+          x: 0, 
+          y: 0, 
+          clientId: 'server', 
+          isClearCanvas: true,
+          timestamp: Date.now()
+        };
+        setReceivedPoints([clearPoint]);
+      };
+      
+      // Eventos de desenho
+      socket.on('draw-point', handleDrawPointEvent);
+      socket.on('clear-canvas', handleClearCanvasEvent);
+      
+      return () => {
+        socket.off('draw-point', handleDrawPointEvent);
+        socket.off('clear-canvas', handleClearCanvasEvent);
+      };
+    }, [roomCode, isDrawer]);
 
     return () => {
       // Limpar listeners ao sair
@@ -721,12 +952,11 @@ function Sala() {
       socket.off('host-left');
       socket.off('removed-by-timeout');
       socket.off('draw-point');
-      socket.off('draw-points-batch'); // Remover novo listener
-      
-      // Limpar intervalo de batching
-      // if (batchInterval) clearInterval(batchInterval);
+      socket.off('draw-points-batch'); 
+      socket.off('player-timeout-update');
+      socket.off('player-reconnected');
     };
-  }, [roomCode, navigate, isDrawer, requestRoomStateThrottled, sendPointsBatch]);
+  }, [roomCode, navigate, isDrawer, requestRoomStateThrottled, sendPointsBatch, drawerId, addNotification]);
 
   // Sincronizar newRounds com maxRounds sempre que maxRounds mudar
   useEffect(() => {
@@ -803,42 +1033,40 @@ function Sala() {
   const handleDrawPoint = (point: { x: number; y: number; pressure?: number }) => {
     if (!isDrawer) return;
     
-    // Adicionar ponto à fila para envio em lote
-    pointQueueRef.current.push({ 
-      x: point.x, 
-      y: point.y,
+    // Normalizar coordenadas e garantir limites corretos
+    const normalizedPoint = {
+      x: Math.max(0, Math.min(1, point.x)),
+      y: Math.max(0, Math.min(1, point.y)),
       pressure: point.pressure || 0.5,
       isStartOfLine: lineStartingRef.current,
       isSinglePoint: lineStartingRef.current && !drawingRef.current
-    });
+    };
     
-    // Para garantir compatibilidade com o servidor atual, continuar enviando pontos individuais
-    // até que o servidor seja atualizado para suportar batching
-    console.log('Enviando ponto individual do desenhista para compatibilidade');
+    // Adicionar ponto à fila para possível envio em lote futuro
+    pointQueueRef.current.push(normalizedPoint);
+    
+    // Enviar o ponto individual para compatibilidade com o sistema atual
     socketService.getSocket().emit('draw-point', { 
       roomCode, 
-      x: point.x, 
-      y: point.y,
-      pressure: point.pressure || 0.5,
+      x: normalizedPoint.x, 
+      y: normalizedPoint.y,
+      pressure: normalizedPoint.pressure,
       color: strokeColor, 
       size: strokeWidth,
-      isStartOfLine: lineStartingRef.current,
-      isSinglePoint: lineStartingRef.current && !drawingRef.current,
+      isStartOfLine: normalizedPoint.isStartOfLine,
+      isSinglePoint: normalizedPoint.isSinglePoint,
       timestamp: Date.now()
     });
     
-    // Para pontos únicos (clique sem movimento) ou pontos de início de linha, enviar imediatamente
-    // para garantir resposta rápida para interações importantes
+    // Para pontos de início de linha, resetar a flag
     if (lineStartingRef.current) {
-      console.log('Enviando ponto inicial imediatamente');
-      // sendPointsBatch(); - Desativado temporariamente
       lineStartingRef.current = false;
     }
     
-    // Se a fila ficar muito grande, enviar imediatamente
-    if (pointQueueRef.current.length > 20) {
-      // sendPointsBatch(); - Desativado temporariamente
-      pointQueueRef.current = []; // Limpar a fila mesmo assim para evitar acúmulo de memória
+    // Se a fila ficar muito grande, limpar para evitar problemas de memória
+    if (pointQueueRef.current.length > 100) {
+      // Manter apenas os últimos 20 pontos
+      pointQueueRef.current = pointQueueRef.current.slice(-20);
     }
   };
 
@@ -861,29 +1089,39 @@ function Sala() {
     }
     
     clearingRef.current = now;
-    console.log('Sala: Limpando canvas e enviando evento clear-canvas');
     
-    // Limpar arrays locais
+    // Limpar arrays locais imediatamente para resposta visual rápida
     setPoints([]);
     setReceivedPoints([]);
     setLines([]);
     pointQueueRef.current = []; // Limpar fila de pontos pendentes
     
-    // Enviar evento para o servidor
+    // Enviar o comando de limpeza normal
     socketService.getSocket().emit('clear-canvas', { roomCode });
     
-    // Enviar também um ponto especial que indica limpeza do canvas para garantir que os espectadores limpem
+    // Enviar um ponto especial com flag de limpeza
+    // Este é um mecanismo redundante para garantir a sincronização
     socketService.getSocket().emit('draw-point', { 
       roomCode, 
       x: 0, 
       y: 0,
-      isClearCanvas: true, // Propriedade especial que indica que o canvas deve ser limpo
-      color: strokeColor, 
-      size: strokeWidth,
+      isClearCanvas: true,
       timestamp: now
     });
     
-    // Resetar flag após um delay maior
+    // Enviar um segundo comando de limpeza com pequeno atraso
+    // Isso aumenta a chance de pelo menos um comando ser recebido por todos os clientes
+    setTimeout(() => {
+      socketService.getSocket().emit('draw-point', { 
+        roomCode, 
+        x: 0, 
+        y: 0,
+        isClearCanvas: true,
+        timestamp: now + 50
+      });
+    }, 50);
+    
+    // Resetar flag após um delay
     setTimeout(() => {
       clearingRef.current = 0;
     }, 500);
@@ -1528,44 +1766,56 @@ function Sala() {
             <p className="text-center py-2 text-white/60">Nenhum jogador na sala...</p>
           ) : (
             <div className="grid gap-2">
-              {players.map((player) => (
-                <div 
-                  key={player.id} 
-                  className={`flex items-center justify-between p-2 rounded-lg ${
-                    player.online === false ? 'bg-red-500/20' : 
-                    player.id === drawerId ? 'bg-green-500/30' : 
-                    'bg-white/20'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    {player.online === false && (
-                      <span className="text-red-300" title="Desconectado">⚠️</span>
-                    )}
-                    {player.id === drawerId && (
-                      <span className="text-green-300" title="Desenhista">✏️</span>
-                    )}
-                    <span className={`${player.online === false ? 'text-gray-400' : ''}`}>
-                      {player.name}
-                    </span>
-                    {player.isHost && (
-                      <span className="bg-yellow-300 text-blue-900 text-xs px-1 py-0.5 rounded">HOST</span>
-                    )}
+              {players.map((player) => {
+                // Verificar se este jogador tem timer de reconexão e garantir que playerId existe
+                const hasReconnectTimer = player.playerId && reconnectTimeouts[player.playerId] > 0;
+                const reconnectTime = hasReconnectTimer ? reconnectTimeouts[player.playerId] : 0;
+                
+                return (
+                  <div 
+                    key={player.id} 
+                    className={`flex items-center justify-between p-2 rounded-lg ${
+                      player.online === false ? 'bg-red-500/20' : 
+                      player.id === drawerId ? 'bg-green-500/30' : 
+                      'bg-white/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {player.online === false && (
+                        <span className="text-red-300" title="Desconectado">⚠️</span>
+                      )}
+                      {player.id === drawerId && (
+                        <span className="text-green-300" title="Desenhista">✏️</span>
+                      )}
+                      <span className={`${player.online === false ? 'text-gray-400' : ''}`}>
+                        {player.name}
+                      </span>
+                      {player.isHost && (
+                        <span className="bg-yellow-300 text-blue-900 text-xs px-1 py-0.5 rounded">HOST</span>
+                      )}
+                      {/* Mostrar timer de reconexão para jogadores offline */}
+                      {player.online === false && hasReconnectTimer && (
+                        <span className="text-xs bg-red-800/50 text-white px-1 py-0.5 rounded">
+                          {reconnectTime}s
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold">{player.score}</span>
+                      {/* Adicionar botão de remover jogador quando usuário atual for host */}
+                      {isCurrentUserHost && player.id !== currentPlayerId && (
+                        <button 
+                          onClick={() => handleRemovePlayer(player.id)}
+                          className="text-red-400 hover:text-red-300 text-sm p-1"
+                          title="Remover jogador"
+                        >
+                          ❌
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold">{player.score}</span>
-                    {/* Adicionar botão de remover jogador quando usuário atual for host */}
-                    {isCurrentUserHost && player.id !== currentPlayerId && (
-                      <button 
-                        onClick={() => handleRemovePlayer(player.id)}
-                        className="text-red-400 hover:text-red-300 text-sm p-1"
-                        title="Remover jogador"
-                      >
-                        ❌
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1630,6 +1880,12 @@ function Sala() {
         </div>
       )}
       
+      {playerReconnected && (
+        <div className="fixed top-0 left-0 w-full bg-green-500 text-white text-center py-2 z-50 font-bold animate-pulse">
+          {playerReconnected.name} reconectou após {playerReconnected.timeDisconnected} segundos!
+        </div>
+      )}
+      
       <div className={`flex-1 flex items-center justify-center w-full p-2 ${deviceType === 'mobile' ? 'py-1 px-1' : 'p-4'}`}>
         <div className={`w-full max-w-4xl flex flex-col items-center justify-center ${deviceType === 'mobile' ? 'space-y-1' : 'space-y-4'}`}>
           {/* Cabeçalho com controles */}
@@ -1657,11 +1913,71 @@ function Sala() {
         </div>
       </div>
       
+      {/* Sistema unificado de notificações */}
+      <div className="fixed z-40 bottom-4 right-4 flex flex-col gap-2 max-w-xs">
+        {notifications.map(notification => {
+          // Selecionar a cor com base no tipo
+          const bgColorClass = 
+            notification.type === 'join' || notification.type === 'reconnect' ? 'bg-green-500' :
+            notification.type === 'leave' ? 'bg-red-500' :
+            notification.type === 'drawer-left' ? 'bg-orange-500' :
+            notification.type === 'host-left' ? 'bg-yellow-500' : 'bg-blue-500';
+            
+          const textColorClass = 
+            notification.type === 'host-left' ? 'text-blue-900' : 'text-white';
+            
+          return (
+            <div 
+              key={notification.id}
+              className={`${bgColorClass} ${textColorClass} px-4 py-2 rounded-lg shadow-lg animate-fade-in-out flex items-center`}
+            >
+              <span>{notification.message}</span>
+            </div>
+          );
+        })}
+      </div>
+      
       {/* Componentes de overlay (modais, notificações) */}
       {winnerName && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
           <div className={`bg-green-500 text-white font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse ${deviceType === 'mobile' ? 'text-2xl' : 'text-4xl'}`}>
             {winnerName} acertou a palavra!
+          </div>
+        </div>
+      )}
+      
+      {/* Notificação quando jogador entra na sala */}
+      {lastJoined && (
+        <div className="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-40 animate-fade-in-out">
+          {lastJoined} entrou na sala!
+        </div>
+      )}
+      
+      {/* Notificação quando jogador sai da sala */}
+      {lastLeft && (
+        <div className="fixed bottom-4 left-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-40 animate-fade-in-out">
+          {lastLeft} saiu da sala!
+        </div>
+      )}
+      
+      {/* Notificação quando desenhista sai */}
+      {drawerLeft && (
+        <div className="fixed top-16 inset-x-0 mx-auto w-fit bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg z-40 animate-bounce">
+          ⚠️ {drawerLeft} desconectou-se! Aguardando reconexão...
+        </div>
+      )}
+      
+      {/* Notificação quando host sai */}
+      {hostLeft && (
+        <div className="fixed top-16 inset-x-0 mx-auto w-fit bg-yellow-500 text-blue-900 px-6 py-3 rounded-lg shadow-lg z-40 font-bold">
+          {hostLeft} é o novo host da sala!
+        </div>
+      )}
+      
+      {roundEnded && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+          <div className={`bg-red-500 text-white font-extrabold px-12 py-8 rounded-xl shadow-2xl border-4 border-white animate-pulse ${deviceType === 'mobile' ? 'text-2xl' : 'text-4xl'}`}>
+            Tempo esgotado!
           </div>
         </div>
       )}

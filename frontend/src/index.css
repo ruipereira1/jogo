@@ -17,6 +17,18 @@ code {
     monospace;
 }
 
+/* Animação de fade-in-out para notificações */
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translateY(20px); }
+  15% { opacity: 1; transform: translateY(0); }
+  85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-fade-in-out {
+  animation: fadeInOut 4s ease-in-out forwards;
+}
+
 /* Animação de spin lento para countdown */
 @keyframes spin-slow {
   from {
@@ -28,5 +40,5 @@ code {
 }
 
 .animate-spin-slow {
-  animation: spin-slow 3s linear infinite;
+  animation: spin-slow 8s linear infinite;
 } 
