@@ -1,0 +1,10 @@
+# Configurações para aplicação Single Page Application
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Configuração de redirecionamentos para SPA
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200 
