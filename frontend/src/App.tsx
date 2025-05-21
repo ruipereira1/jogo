@@ -1,0 +1,21 @@
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Home from './pages/Home';
+import CriarSala from './pages/CriarSala';
+import EntrarSala from './pages/EntrarSala';
+import Sala from './pages/Sala';
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/criar-sala" element={<CriarSala />} />
+        <Route path="/entrar-sala" element={<EntrarSala />} />
+        <Route path="/sala/:roomCode" element={<Sala />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App; 
