@@ -230,7 +230,11 @@ function Sala() {
   // Adicionar suporte para eventos de toque
   const handleTouchStart = (e: React.TouchEvent) => {
     if (!isDrawer) return;
+    // Previne rolagem da tela
     e.preventDefault();
+    e.stopPropagation();
+    
+    // Armazena posição inicial do toque
     setDrawing(true);
     const touch = e.touches[0];
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -242,7 +246,10 @@ function Sala() {
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isDrawer || !drawing) return;
+    // Previne rolagem da tela
     e.preventDefault();
+    e.stopPropagation();
+    
     const touch = e.touches[0];
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = touch.clientX - rect.left;
@@ -257,7 +264,10 @@ function Sala() {
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (!isDrawer) return;
+    // Previne rolagem da tela
     e.preventDefault();
+    e.stopPropagation();
+    
     setDrawing(false);
     // Enviar a última linha desenhada para o backend
     const socket = socketService.getSocket();
@@ -398,6 +408,7 @@ function Sala() {
                       width={canvasSize.width}
                       height={canvasSize.height}
                       className="border-2 border-yellow-300 bg-white rounded mb-4 cursor-crosshair mx-auto"
+                      style={{ touchAction: "none" }}
                       onMouseDown={handleMouseDown}
                       onMouseMove={handleMouseMove}
                       onMouseUp={handleMouseUp}
@@ -424,7 +435,7 @@ function Sala() {
                       width={canvasSize.width}
                       height={canvasSize.height}
                       className="border-2 border-yellow-300 bg-white rounded mb-4 mx-auto"
-                      style={{ cursor: 'not-allowed' }}
+                      style={{ touchAction: "none", cursor: 'not-allowed' }}
                     />
                   </div>
                   <p className="text-xs md:text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
