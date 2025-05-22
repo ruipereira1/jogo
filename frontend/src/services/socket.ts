@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 // Usa a URL de produção quando o app estiver rodando no Netlify, caso contrário usa localhost
 const isProduction = window.location.hostname !== 'localhost';
 const SOCKET_URL = isProduction
-  ? 'https://jogo-yslo.onrender.com'
+  ? 'https://jogo-0vuq.onrender.com'
   : 'http://localhost:4000';
 
 class SocketService {
