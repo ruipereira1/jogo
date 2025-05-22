@@ -11,15 +11,24 @@ function EntrarSala() {
 
   useEffect(() => {
     // Conectar ao servidor Socket.IO
-    socketService.connect();
+    const socket = socketService.connect();
+    
+    // Ouvir evento de sala não encontrada
+    socket.on('room-not-found', () => {
+      setError('Sala não encontrada ou foi excluída');
+      navigate('/');
+    });
     
     return () => {
+      // Limpar listener
+      socket.off('room-not-found');
+      
       // Desconectar apenas se o usuário sair sem entrar na sala
       if (!socketService.getUser()) {
         socketService.disconnect();
       }
     };
-  }, []);
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

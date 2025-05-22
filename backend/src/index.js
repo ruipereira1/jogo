@@ -139,6 +139,22 @@ function nextRoundOrEnd(room, io) {
 
 io.on('connection', (socket) => {
   console.log('Novo usuário conectado:', socket.id);
+  
+  // Verificar se o usuário está tentando acessar uma URL de sala diretamente
+  if (socket.handshake.headers.referer) {
+    const referer = socket.handshake.headers.referer;
+    if (referer.includes('/sala/')) {
+      try {
+        const roomCode = referer.split('/sala/')[1];
+        if (roomCode && !rooms.has(roomCode)) {
+          // Enviar evento informando que a sala não existe
+          socket.emit('room-not-found', { roomCode });
+        }
+      } catch (error) {
+        console.error('Erro ao verificar sala:', error);
+      }
+    }
+  }
 
   // Criar sala
   socket.on('create-room', ({ userName, rounds, difficulty }, callback) => {
@@ -180,6 +196,7 @@ io.on('connection', (socket) => {
       const room = rooms.get(roomCode);
       
       if (!room) {
+        io.emit('room-not-found', { roomCode });
         return callback({ success: false, error: 'Sala não encontrada' });
       }
 

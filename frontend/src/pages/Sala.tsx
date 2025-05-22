@@ -158,6 +158,22 @@ function Sala() {
     socket.on('room-deleted', () => {
       navigate('/');
     });
+    
+    // Escutar evento quando a sala não é encontrada
+    socket.on('room-not-found', () => {
+      setError('Sala não encontrada ou foi excluída');
+      setTimeout(() => {
+        navigate('/');
+      }, 3000);
+    });
+    
+    // Escutar evento quando a sala não é encontrada
+    socket.on('room-not-found', () => {
+      setError('Sala não encontrada ou foi excluída');
+      setTimeout(() => {
+        navigate('/');
+      }, 3000);
+    });
 
     setIsLoading(false);
 
@@ -175,6 +191,7 @@ function Sala() {
       socket.off('game-ended');
       socket.off('game-restarted');
       socket.off('room-deleted');
+      socket.off('room-not-found');
     };
   }, [roomCode, navigate]);
 
