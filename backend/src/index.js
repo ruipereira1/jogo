@@ -14,22 +14,43 @@ const io = new Server(server, {
 
 app.use(cors());
 app.get('/', (req, res) => {
-  res.send('Servidor ArteRápida rodando!');
+  res.send('Servidor ArteRápida a funcionar!');
 });
 
 // Armazenamento das salas (em memória, para simplificar)
 const rooms = new Map();
 
-// Listas de palavras por dificuldade
+// NOTA: Em uma atualização futura, podemos implementar seleção de idioma com:
+// 1. Um novo parâmetro no create-room: { language: 'pt_BR' ou 'pt_PT' }
+// 2. Manter duas listas de palavras (Brasil/Portugal)
+// 3. Escolher a lista adequada ao iniciar o jogo
+
+// NOTA: Implementação futura - Categorias temáticas:
+// Podemos adicionar palavras por categorias como:
+// const CATEGORIES = {
+//   ANIMAIS: ['cão', 'gato', 'pássaro', 'peixe', 'cavalo', 'coelho', ...],
+//   COMIDA: ['pão', 'queijo', 'bacalhau', 'francesinha', 'pastel', ...],
+//   DESPORTO: ['futebol', 'ténis', 'basquetebol', 'natação', 'ciclismo', ...],
+//   PAÍSES: ['Portugal', 'Espanha', 'França', 'Alemanha', 'Brasil', ...]
+// }
+// E adicionar opção no create-room: { category: 'ANIMAIS' ou 'RANDOM' para misturar todas }
+
+// Listas de palavras em português de Portugal por dificuldade
 const WORDS_FACIL = [
-  'cachorro', 'gato', 'carro', 'casa', 'árvore', 'livro', 'bola', 'pato', 'copo', 'flor', 'sol', 'lua', 'estrela', 'fogo', 'pato', 'mesa', 'porta', 'sapato', 'peixe', 'pão'
+  'cão', 'gato', 'carro', 'casa', 'árvore', 'livro', 'bola', 'pato', 'copo', 'flor', 'sol', 'lua', 'estrela', 'fogo', 'mesa', 'porta', 'sapato', 'peixe', 'pão', 'cadeira', 'telemóvel', 'metro', 'autocarro', 'comboio', 'praia', 'pastel', 'mota', 'café', 'bica', 'chuva', 'elétrico', 'óculos', 'gelo', 'passeio', 'rua'
 ];
 const WORDS_MEDIO = [
-  'computador', 'bicicleta', 'telefone', 'avião', 'montanha', 'foguete', 'janela', 'escada', 'cachoeira', 'baleia', 'tartaruga', 'girassol', 'travesseiro', 'escorrega', 'buzina', 'barraca', 'escorpião', 'bule', 'biscoito', 'bateria'
+  'computador', 'bicicleta', 'telefone', 'avião', 'montanha', 'foguetão', 'janela', 'escada', 'cascata', 'baleia', 'tartaruga', 'girassol', 'almofada', 'escorrega', 'buzina', 'tenda', 'escorpião', 'bule', 'bolacha', 'bateria', 'pequeno-almoço', 'frigorífico', 'autocarro', 'passadeira', 'farmácia', 'eléctrico', 'império', 'francesinha', 'bacalhau', 'azulejo', 'portagem', 'gasolineira', 'talho', 'autocarro', 'camioneta', 'bicharoco'
 ];
 const WORDS_DIFICIL = [
-  'microscópio', 'paralelepípedo', 'ornitorrinco', 'helicóptero', 'canguru', 'escaravelho', 'anfíbio', 'estetoscópio', 'circuito', 'criptografia', 'maracujá', 'turbilhão', 'girassol', 'crocodilo', 'escafandro', 'bumerangue', 'trombone', 'saxofone', 'candelabro', 'ampulheta'
+  'microscópio', 'paralelepípedo', 'ornitorrinco', 'helicóptero', 'canguru', 'escaravelho', 'anfíbio', 'estetoscópio', 'circuito', 'criptografia', 'maracujá', 'turbilhão', 'girassol', 'crocodilo', 'escafandro', 'bumerangue', 'trombone', 'saxofone', 'candelabro', 'ampulheta', 'otorrinolaringologista', 'eletrocardiograma', 'descodificador', 'pneumoultramicroscopicossilicovulcanoconiótico', 'hipopotomonstrosesquipedaliofobia', 'descentralização', 'constitucionalidade', 'multidisciplinaridade', 'fotossensibilidade', 'inconstitucionalissimamente'
 ];
+
+// NOTA: Implementação futura - Sistema de dicas:
+// Quando o tempo estiver a acabar, podemos mostrar parte da palavra:
+// 1. Quando faltar 30s: mostrar o número de letras (ex: _ _ _ _ _ _)
+// 2. Quando faltar 20s: mostrar a primeira letra (ex: C _ _ _ _ _)
+// 3. Quando faltar 10s: mostrar mais uma letra aleatória (ex: C _ Ç _ _ _)
 
 // Função para gerar código aleatório de 6 caracteres
 function generateRoomCode() {
@@ -209,6 +230,7 @@ io.on('connection', (socket) => {
         if (room.players.length === 0) {
           rooms.delete(roomCode);
           console.log(`Sala ${roomCode} deletada pois ficou vazia`);
+          io.emit('room-deleted', { roomCode });
           return;
         }
         
