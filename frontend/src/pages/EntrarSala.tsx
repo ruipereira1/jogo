@@ -27,10 +27,10 @@ function EntrarSala() {
     setError('');
     
     try {
-      // Entrar na sala no servidor
-      await socketService.joinRoom(nome, codigo.toUpperCase());
+      // Entrar na sala usando o serviço
+      await socketService.joinRoom(nome, codigo);
       // Redirecionar para a sala
-      navigate(`/sala/${codigo.toUpperCase()}`);
+      navigate(`/sala/${codigo}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao entrar na sala');
       console.error('Erro ao entrar na sala:', err);
@@ -40,18 +40,18 @@ function EntrarSala() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white">
-      <h2 className="text-2xl font-bold mb-6">Entrar em Sala</h2>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white p-4">
+      <h2 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Entrar em Sala</h2>
       
       {error && (
-        <div className="bg-red-500 text-white p-3 rounded-lg mb-4 w-80 text-center">
+        <div className="bg-red-500 text-white p-2 md:p-3 rounded-lg mb-3 md:mb-4 w-full max-w-xs md:max-w-sm text-center text-sm md:text-base">
           {error}
         </div>
       )}
       
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-80">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3 md:gap-4 w-full max-w-xs md:max-w-sm">
         <input
-          className="p-3 rounded text-blue-900"
+          className="p-2 md:p-3 rounded text-blue-900 text-sm md:text-base"
           type="text"
           placeholder="Seu nome"
           value={nome}
@@ -60,22 +60,21 @@ function EntrarSala() {
           disabled={isLoading}
         />
         <input
-          className="p-3 rounded text-blue-900"
+          className="p-2 md:p-3 rounded text-blue-900 text-sm md:text-base"
           type="text"
           placeholder="Código da sala"
           value={codigo}
-          onChange={e => setCodigo(e.target.value)}
+          onChange={e => setCodigo(e.target.value.toUpperCase())}
           required
-          maxLength={6}
-          style={{ textTransform: 'uppercase' }}
           disabled={isLoading}
+          maxLength={6}
         />
         <button 
           className={`${
             isLoading 
               ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-white hover:bg-gray-200'
-          } text-blue-900 px-6 py-2 rounded-lg font-semibold shadow transition`} 
+              : 'bg-yellow-300 hover:bg-yellow-400'
+          } text-blue-900 px-4 py-2 md:px-6 md:py-2 rounded-lg font-semibold shadow transition text-sm md:text-base`} 
           type="submit"
           disabled={isLoading}
         >
@@ -85,7 +84,7 @@ function EntrarSala() {
       
       <button 
         onClick={() => navigate('/')}
-        className="mt-4 text-white hover:underline"
+        className="mt-4 text-white hover:underline text-sm md:text-base"
       >
         Voltar
       </button>

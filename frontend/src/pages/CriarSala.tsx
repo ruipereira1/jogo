@@ -41,18 +41,18 @@ function CriarSala() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white">
-      <h2 className="text-2xl font-bold mb-6">Criar Sala</h2>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white p-4">
+      <h2 className="text-xl md:text-2xl font-bold mb-4 md:mb-6">Criar Sala</h2>
       
       {error && (
-        <div className="bg-red-500 text-white p-3 rounded-lg mb-4 w-80 text-center">
+        <div className="bg-red-500 text-white p-2 md:p-3 rounded-lg mb-3 md:mb-4 w-full max-w-xs md:max-w-sm text-center text-sm md:text-base">
           {error}
         </div>
       )}
       
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-80">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3 md:gap-4 w-full max-w-xs md:max-w-sm">
         <input
-          className="p-3 rounded text-blue-900"
+          className="p-2 md:p-3 rounded text-blue-900 text-sm md:text-base"
           type="text"
           placeholder="Seu nome"
           value={nome}
@@ -60,43 +60,53 @@ function CriarSala() {
           required
           disabled={isLoading}
         />
-        <input
-          className="p-3 rounded text-blue-900"
-          type="number"
-          min={1}
-          max={10}
-          value={rounds}
-          onChange={e => setRounds(Number(e.target.value))}
-          required
-          disabled={isLoading}
-          placeholder="Quantidade de rondas"
-        />
-        <select
-          className="p-3 rounded text-blue-900"
-          value={difficulty}
-          onChange={e => setDifficulty(e.target.value)}
-          disabled={isLoading}
-        >
-          <option value="facil">Fácil</option>
-          <option value="medio">Médio</option>
-          <option value="dificil">Difícil</option>
-        </select>
+        
+        <div className="flex flex-col md:flex-row gap-3 md:gap-4">
+          <div className="flex-1">
+            <label className="block text-white text-sm mb-1">Rondas</label>
+            <input
+              className="p-2 md:p-3 rounded text-blue-900 w-full text-sm md:text-base"
+              type="number"
+              min={1}
+              max={10}
+              value={rounds}
+              onChange={e => setRounds(Number(e.target.value))}
+              required
+              disabled={isLoading}
+            />
+          </div>
+          
+          <div className="flex-1">
+            <label className="block text-white text-sm mb-1">Dificuldade</label>
+            <select
+              className="p-2 md:p-3 rounded text-blue-900 w-full text-sm md:text-base"
+              value={difficulty}
+              onChange={e => setDifficulty(e.target.value)}
+              disabled={isLoading}
+            >
+              <option value="facil">Fácil</option>
+              <option value="medio">Médio</option>
+              <option value="dificil">Difícil</option>
+            </select>
+          </div>
+        </div>
+        
         <button 
           className={`${
             isLoading 
               ? 'bg-gray-400 cursor-not-allowed' 
               : 'bg-yellow-300 hover:bg-yellow-400'
-          } text-blue-900 px-6 py-2 rounded-lg font-semibold shadow transition`} 
+          } text-blue-900 px-4 py-2 md:px-6 md:py-3 rounded-lg font-semibold shadow transition mt-2 text-sm md:text-base`} 
           type="submit"
           disabled={isLoading}
         >
-          {isLoading ? 'Criando...' : 'Criar'}
+          {isLoading ? 'Criando...' : 'Criar Sala'}
         </button>
       </form>
       
       <button 
         onClick={() => navigate('/')}
-        className="mt-4 text-white hover:underline"
+        className="mt-4 text-white hover:underline text-sm md:text-base"
       >
         Voltar
       </button>
