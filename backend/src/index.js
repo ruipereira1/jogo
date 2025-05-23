@@ -24,6 +24,23 @@ app.get('/', (req, res) => {
 // Armazenamento das salas (em memória, para simplificar)
 const rooms = new Map();
 
+// Limpeza automática de salas antigas a cada 30 minutos
+setInterval(() => {
+  const now = Date.now();
+  const oneHour = 60 * 60 * 1000; // 1 hora em ms
+  
+  rooms.forEach((room, roomCode) => {
+    // Deletar salas vazias há mais de 1 hora
+    if (room.players.length === 0 && room.emptyTime && (now - room.emptyTime) > oneHour) {
+      if (room.deleteTimeout) {
+        clearTimeout(room.deleteTimeout);
+      }
+      rooms.delete(roomCode);
+      console.log(`Sala antiga ${roomCode} deletada na limpeza automática`);
+    }
+  });
+}, 30 * 60 * 1000); // A cada 30 minutos
+
 // NOTA: Em uma atualização futura, podemos implementar seleção de idioma com:
 // 1. Um novo parâmetro no create-room: { language: 'pt_BR' ou 'pt_PT' }
 // 2. Manter duas listas de palavras (Brasil/Portugal)
@@ -64,6 +81,17 @@ function generateRoomCode() {
     result += characters.charAt(Math.floor(Math.random() * characters.length));
   }
   return result;
+}
+
+// Função para normalizar texto removendo acentos e caracteres especiais
+function normalizeText(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[^a-z0-9\s]/g, '') // Remove caracteres especiais
+    .replace(/\s+/g, ' '); // Normaliza espaços
 }
 
 // Função para iniciar uma nova ronda
@@ -160,6 +188,10 @@ io.on('connection', (socket) => {
   socket.on('create-room', ({ userName, rounds, difficulty }, callback) => {
     try {
       const roomCode = generateRoomCode();
+      
+      // Validar número de rondas
+      const validRounds = rounds && rounds >= 1 && rounds <= 10 ? rounds : 3;
+      
       // Criar objeto da sala
       rooms.set(roomCode, {
         id: roomCode,
@@ -174,7 +206,7 @@ io.on('connection', (socket) => {
         currentDrawer: null,
         currentWord: null,
         round: 0,
-        maxRounds: rounds || 3,
+        maxRounds: validRounds,
         timePerRound: 60,
         difficulty: difficulty || 'facil'
       });
@@ -182,7 +214,7 @@ io.on('connection', (socket) => {
       socket.join(roomCode);
       socket.data.roomCode = roomCode;
       socket.data.userName = userName;
-      console.log(`Sala ${roomCode} criada por ${userName}`);
+      console.log(`Sala ${roomCode} criada por ${userName} com ${validRounds} rondas`);
       callback({ success: true, roomCode });
     } catch (error) {
       console.error('Erro ao criar sala:', error);
@@ -204,20 +236,36 @@ io.on('connection', (socket) => {
         return callback({ success: false, error: 'Jogo já iniciado' });
       }
 
+      // Se a sala estava vazia e marcada para deleção, cancelar
+      if (room.deleteTimeout) {
+        clearTimeout(room.deleteTimeout);
+        room.deleteTimeout = null;
+        room.isEmpty = false;
+        console.log(`Sala ${roomCode} reativada por ${userName}. Deleção cancelada.`);
+      }
+
+      // Determinar se será o host (se sala estava vazia)
+      const isHost = room.players.length === 0;
+
       // Adicionar jogador à sala
       room.players.push({
         id: socket.id,
         name: userName,
         score: 0,
-        isHost: false
+        isHost: isHost
       });
+
+      // Se for o host, definir como tal
+      if (isHost) {
+        room.host = socket.id;
+      }
 
       // Associar o socket à sala
       socket.join(roomCode);
       socket.data.roomCode = roomCode;
       socket.data.userName = userName;
 
-      console.log(`${userName} entrou na sala ${roomCode}`);
+      console.log(`${userName} entrou na sala ${roomCode}${isHost ? ' como novo host' : ''}`);
       
       // Notificar todos na sala sobre o novo jogador
       io.to(roomCode).emit('player-joined', {
@@ -247,12 +295,35 @@ io.on('connection', (socket) => {
         
         console.log(`${userName || socket.id} saiu da sala ${roomCode}`);
         
-        // Se não sobrou ninguém, deletar a sala
+        // Se não sobrou ninguém, marcar para deletar após 10 minutos
         if (room.players.length === 0) {
-          rooms.delete(roomCode);
-          console.log(`Sala ${roomCode} deletada pois ficou vazia`);
-          io.emit('room-deleted', { roomCode });
+          console.log(`Sala ${roomCode} ficou vazia. Será deletada em 10 minutos se ninguém entrar.`);
+          
+          // Cancelar timeout anterior se existir
+          if (room.deleteTimeout) {
+            clearTimeout(room.deleteTimeout);
+          }
+          
+          // Marcar sala como vazia e definir timeout para deleção
+          room.isEmpty = true;
+          room.emptyTime = Date.now();
+          room.deleteTimeout = setTimeout(() => {
+            if (rooms.has(roomCode) && room.players.length === 0) {
+              rooms.delete(roomCode);
+              console.log(`Sala ${roomCode} deletada após 10 minutos vazia`);
+              io.emit('room-deleted', { roomCode });
+            }
+          }, 10 * 60 * 1000); // 10 minutos
+          
           return;
+        }
+        
+        // Se alguém voltou para a sala, cancelar a deleção
+        if (room.deleteTimeout) {
+          clearTimeout(room.deleteTimeout);
+          room.deleteTimeout = null;
+          room.isEmpty = false;
+          console.log(`Sala ${roomCode} não está mais vazia. Deleção cancelada.`);
         }
         
         // Se o host saiu, passar o controle para outro jogador
@@ -299,7 +370,9 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room || room.status !== 'playing') return;
     const userName = socket.data.userName;
-    const isCorrect = text.trim().toLowerCase() === (room.currentWord || '').toLowerCase();
+    const normalizedGuess = normalizeText(text);
+    const normalizedWord = normalizeText(room.currentWord || '');
+    const isCorrect = normalizedGuess === normalizedWord;
     io.to(roomCode).emit('guess', {
       name: userName,
       text,
@@ -351,12 +424,18 @@ io.on('connection', (socket) => {
   socket.on('restart-game', ({ roomCode, rounds }) => {
     const room = rooms.get(roomCode);
     if (!room) return;
+    
+    // Validar número de rondas
+    const validRounds = rounds && rounds >= 1 && rounds <= 10 ? rounds : 3;
+    
     // Resetar scores e estado
     room.players.forEach(p => p.score = 0);
     room.round = 1;
-    room.maxRounds = rounds || 3;
+    room.maxRounds = validRounds;
     room.status = 'playing';
     room.id = roomCode;
+    
+    console.log(`Partida reiniciada na sala ${roomCode} com ${validRounds} rondas`);
     io.to(roomCode).emit('game-restarted');
     startRound(room, io);
   });

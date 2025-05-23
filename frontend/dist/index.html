@@ -4,8 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ArteRápida</title>
-    <script type="module" crossorigin src="/assets/index-cca2f9b9.js"></script>
-    <link rel="stylesheet" href="/assets/index-0d79eaca.css">
+    <style>
+      html, body {
+        overflow-x: hidden;
+        touch-action: manipulation;
+        position: relative;
+        -webkit-tap-highlight-color: transparent;
+      }
+      
+      @media (max-width: 768px) {
+        body {
+          min-height: 100vh;
+          min-height: -webkit-fill-available;
+        }
+      }
+      
+      input, button, select, textarea {
+        font-size: 16px !important;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-cb3910af.js"></script>
+    <link rel="stylesheet" href="/assets/index-22516d17.css">
   </head>
   <body>
     <div id="root"></div>
