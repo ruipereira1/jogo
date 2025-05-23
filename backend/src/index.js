@@ -333,6 +333,29 @@ io.on('connection', (socket) => {
           console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
         }
         
+        // Se o desenhista atual saiu durante uma ronda ativa, terminar a ronda
+        if (room.currentDrawer === socket.id && room.status === 'playing') {
+          console.log(`Desenhista ${userName} saiu durante a ronda. Terminando ronda automaticamente.`);
+          
+          // Parar o timer da ronda atual
+          if (room.timerInterval) {
+            clearInterval(room.timerInterval);
+          }
+          
+          // Notificar que a ronda terminou por saída do desenhista
+          io.to(roomCode).emit('round-ended', { 
+            reason: 'drawer-left',
+            message: `${userName} (desenhista) saiu da sala. Avançando para próxima ronda...`
+          });
+          
+          // Resetar currentDrawer e currentWord
+          room.currentDrawer = null;
+          room.currentWord = null;
+          
+          // Avançar para próxima ronda após 3 segundos
+          setTimeout(() => nextRoundOrEnd(room, io), 3000);
+        }
+        
         // Notificar os jogadores restantes
         io.to(roomCode).emit('player-left', {
           playerId: socket.id,

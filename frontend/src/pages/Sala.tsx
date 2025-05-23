@@ -160,10 +160,15 @@ function Sala() {
       setTimer(timeLeft);
     });
 
-    socket.on('round-ended', ({ reason }) => {
+    socket.on('round-ended', ({ reason, message }) => {
       if (reason === 'timeout') {
         setRoundEnded(true);
         setTimeout(() => setRoundEnded(false), 4000); // Esconde a mensagem após 4 segundos
+      } else if (reason === 'drawer-left') {
+        // Mostrar mensagem especial quando o desenhista sai
+        setToastMessage(message || 'O desenhista saiu da sala. Avançando para próxima ronda...');
+        setShowToast(true);
+        setTimeout(() => setShowToast(false), 4000);
       }
     });
 
