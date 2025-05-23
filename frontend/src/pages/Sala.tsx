@@ -245,7 +245,7 @@ function Sala() {
       setIsReconnecting(false);
       if (roomCode && user) {
         // Tentar reentrar na sala após reconexão
-        socket.emit('join-room', { userName: user.name, roomCode }, (response) => {
+        socket.emit('join-room', { userName: user.name, roomCode }, (response: { success: boolean; error?: string }) => {
           if (!response.success) {
             setError('Erro ao reconectar à sala');
           }
