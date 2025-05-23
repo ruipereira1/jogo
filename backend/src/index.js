@@ -120,6 +120,16 @@ function startRound(room, io) {
       if (room.difficulty === 'dificil') wordList = WORDS_DIFICIL;
       const word = wordList[Math.floor(Math.random() * wordList.length)];
       room.currentWord = word;
+      
+      // Adicionar palavra ao histórico
+      if (!room.wordHistory) room.wordHistory = [];
+      room.wordHistory.push({
+        round: room.round,
+        word: word,
+        drawer: drawer.name,
+        guessedBy: []
+      });
+      
       // Notifica todos os jogadores
       room.players.forEach(player => {
         if (player.id === drawer.id) {
@@ -141,11 +151,41 @@ function startRound(room, io) {
       room._lastTimeLeft = timeLeft;
       io.to(room.id).emit('timer-update', { timeLeft });
       if (room.timerInterval) clearInterval(room.timerInterval);
+      
+      // Sistema de dicas progressivas
+      let hintsGiven = 0;
+      const maxHints = 3;
+      
       room.timerInterval = setInterval(() => {
         timeLeft--;
+        room._lastTimeLeft = timeLeft;
         io.to(room.id).emit('timer-update', { timeLeft });
+        
+        // Sistema de dicas: dar dicas quando restam 40s, 25s e 10s
+        if (timeLeft === 40 && hintsGiven === 0) {
+          const hint = `Dica 1: A palavra tem ${word.length} letras: ${word.replace(/./g, '_ ')}`;
+          io.to(room.id).emit('hint', { hint, type: 'letters' });
+          hintsGiven++;
+        } else if (timeLeft === 25 && hintsGiven === 1) {
+          const hint = `Dica 2: Primeira letra: ${word[0].toUpperCase()}${word.slice(1).replace(/./g, ' _')}`;
+          io.to(room.id).emit('hint', { hint, type: 'first-letter' });
+          hintsGiven++;
+        } else if (timeLeft === 10 && hintsGiven === 2) {
+          // Mostrar uma letra aleatória no meio
+          const randomIndex = Math.floor(Math.random() * (word.length - 2)) + 1;
+          let hintWord = word.split('').map((char, i) => {
+            if (i === 0 || i === randomIndex) return char.toUpperCase();
+            return '_';
+          }).join(' ');
+          const hint = `Dica 3: ${hintWord}`;
+          io.to(room.id).emit('hint', { hint, type: 'random-letter' });
+          hintsGiven++;
+        }
+        
         if (timeLeft <= 0) {
           clearInterval(room.timerInterval);
+          // Revelar a palavra quando o tempo acabar
+          io.to(room.id).emit('word-reveal', { word: word });
           io.to(room.id).emit('round-ended', { reason: 'timeout' });
           nextRoundOrEnd(room, io);
         }
@@ -403,6 +443,14 @@ io.on('connection', (socket) => {
     });
     // Lógica de pontuação dinâmica
     if (isCorrect) {
+      // Adicionar ao histórico quem acertou
+      if (room.wordHistory && room.wordHistory.length > 0) {
+        const currentRoundHistory = room.wordHistory[room.wordHistory.length - 1];
+        if (currentRoundHistory && !currentRoundHistory.guessedBy.includes(userName)) {
+          currentRoundHistory.guessedBy.push(userName);
+        }
+      }
+      
       // Calcular pontos com base no tempo restante
       let timeLeft = 0;
       if (room.timerInterval && room.timePerRound) {
@@ -435,6 +483,39 @@ io.on('connection', (socket) => {
       io.to(roomCode).emit('round-ended', { reason: 'guessed' });
       setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
     }
+  });
+
+  // Sistema de chat durante o jogo
+  socket.on('chat-message', ({ roomCode, message }) => {
+    if (!roomCode || !message || !message.trim()) return;
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    const userName = socket.data.userName;
+    
+    // Verificar se a mensagem não é um palpite (para evitar spoilers)
+    const normalizedMessage = normalizeText(message);
+    const normalizedWord = normalizeText(room.currentWord || '');
+    const isWordGuess = room.status === 'playing' && normalizedMessage === normalizedWord;
+    
+    if (!isWordGuess) {
+      io.to(roomCode).emit('chat-message', {
+        name: userName,
+        message: message.trim(),
+        timestamp: Date.now()
+      });
+    }
+  });
+
+  // Obter histórico de palavras
+  socket.on('get-word-history', ({ roomCode }, callback) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      return callback({ success: false, error: 'Sala não encontrada' });
+    }
+    callback({ 
+      success: true, 
+      history: room.wordHistory || [] 
+    });
   });
 
   // Limpar o canvas

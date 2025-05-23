@@ -41,6 +41,17 @@ function Sala() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showShareModal, setShowShareModal] = useState(false);
+  
+  // Novos estados para melhorias
+  const [hints, setHints] = useState<{ hint: string; type: string }[]>([]);
+  const [revealedWord, setRevealedWord] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<{ name: string; message: string; timestamp: number }[]>([]);
+  const [chatMessage, setChatMessage] = useState('');
+  const [showChat, setShowChat] = useState(false);
+  const [wordHistory, setWordHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
 
   // Adicionar viewport meta tag para mobile através do useEffect
   useEffect(() => {
@@ -206,12 +217,50 @@ function Sala() {
       }, 3000);
     });
     
-    // Escutar evento quando a sala não é encontrada
-    socket.on('room-not-found', () => {
-      setError('Sala não encontrada ou foi excluída');
+    // Novos listeners para as melhorias
+    socket.on('hint', ({ hint, type }) => {
+      setHints(prev => [...prev, { hint, type }]);
+      setToastMessage(hint);
+      setShowToast(true);
+      setTimeout(() => setShowToast(false), 4000);
+    });
+
+    socket.on('word-reveal', ({ word }) => {
+      setRevealedWord(word);
+      setToastMessage(`A palavra era: ${word}`);
+      setShowToast(true);
       setTimeout(() => {
-        navigate('/');
-      }, 3000);
+        setShowToast(false);
+        setRevealedWord(null);
+      }, 5000);
+    });
+
+    socket.on('chat-message', ({ name, message, timestamp }) => {
+      setChatMessages(prev => [...prev, { name, message, timestamp }]);
+    });
+
+    // Sistema de reconexão
+    socket.on('connect', () => {
+      setConnectionStatus('connected');
+      setIsReconnecting(false);
+      if (roomCode && user) {
+        // Tentar reentrar na sala após reconexão
+        socket.emit('join-room', { userName: user.name, roomCode }, (response) => {
+          if (!response.success) {
+            setError('Erro ao reconectar à sala');
+          }
+        });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      setConnectionStatus('disconnected');
+      setIsReconnecting(true);
+    });
+
+    socket.on('reconnect', () => {
+      setConnectionStatus('connected');
+      setIsReconnecting(false);
     });
 
     setIsLoading(false);
@@ -231,6 +280,12 @@ function Sala() {
       socket.off('game-restarted');
       socket.off('room-deleted');
       socket.off('room-not-found');
+      socket.off('hint');
+      socket.off('word-reveal');
+      socket.off('chat-message');
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('reconnect');
     };
   }, [roomCode, navigate]);
 
@@ -435,6 +490,28 @@ function Sala() {
     setTimeout(() => setShowToast(false), 3000);
   };
 
+  // Novas funções para as melhorias
+  const handleChatSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMessage.trim()) return;
+    socketService.getSocket().emit('chat-message', { roomCode, message: chatMessage });
+    setChatMessage('');
+  };
+
+  const handleGetWordHistory = () => {
+    socketService.getSocket().emit('get-word-history', { roomCode }, (response: { success: boolean; history?: any[]; error?: string }) => {
+      if (response.success && response.history) {
+        setWordHistory(response.history);
+        setShowHistory(true);
+      }
+    });
+  };
+
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400">
@@ -459,10 +536,86 @@ function Sala() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-400 text-white p-1 sm:p-2 md:p-4 overflow-x-hidden">
+      {/* Indicador de conexão */}
+      {connectionStatus !== 'connected' && (
+        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center py-2 z-50 text-sm">
+          {connectionStatus === 'reconnecting' ? '🔄 Reconectando...' : '❌ Sem conexão'}
+        </div>
+      )}
+      
       {/* Toast de notificação */}
       {showToast && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm animate-fade-in-out">
           {toastMessage}
+        </div>
+      )}
+      
+      {/* Modal de chat */}
+      {showChat && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-4 max-w-md w-full max-h-96 flex flex-col">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-blue-900 text-lg font-bold">Chat</h3>
+              <button onClick={() => setShowChat(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto bg-gray-100 rounded p-2 mb-3 text-sm text-gray-800">
+              {chatMessages.length === 0 ? (
+                <p className="text-gray-500 text-center py-4">Sem mensagens ainda...</p>
+              ) : (
+                chatMessages.map((msg, i) => (
+                  <div key={i} className="mb-2">
+                    <span className="font-semibold text-blue-900">{msg.name}</span>
+                    <span className="text-gray-500 text-xs ml-2">{formatTime(msg.timestamp)}</span>
+                    <div className="text-gray-800">{msg.message}</div>
+                  </div>
+                ))
+              )}
+            </div>
+            
+            <form onSubmit={handleChatSubmit} className="flex gap-2">
+              <input
+                type="text"
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                placeholder="Digite sua mensagem..."
+                className="flex-1 p-2 border rounded text-gray-800 text-sm"
+                autoComplete="off"
+              />
+              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                Enviar
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+      
+      {/* Modal de histórico */}
+      {showHistory && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-4 max-w-md w-full max-h-96 flex flex-col">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-blue-900 text-lg font-bold">Histórico de Palavras</h3>
+              <button onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto text-gray-800 text-sm">
+              {wordHistory.length === 0 ? (
+                <p className="text-gray-500 text-center py-4">Nenhuma palavra ainda...</p>
+              ) : (
+                wordHistory.map((item, i) => (
+                  <div key={i} className="mb-3 p-2 bg-gray-100 rounded">
+                    <div className="font-semibold">Ronda {item.round}</div>
+                    <div className="text-blue-900 font-bold">{item.word}</div>
+                    <div className="text-gray-600 text-xs">Desenhista: {item.drawer}</div>
+                    {item.guessedBy.length > 0 && (
+                      <div className="text-green-600 text-xs">Acertaram: {item.guessedBy.join(', ')}</div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
       
@@ -584,26 +737,47 @@ function Sala() {
           <span className="bg-blue-800 text-white px-2 py-1 sm:px-3 sm:py-1 md:px-4 md:py-2 rounded-lg font-semibold shadow text-xs sm:text-sm md:text-base">
             Jogadores: {players.length}
           </span>
-          <div className="flex gap-1 sm:gap-2 mt-1 sm:mt-0">
+          <div className="flex gap-1 sm:gap-2 mt-1 sm:mt-0 flex-wrap">
+            <button
+              onClick={() => setShowChat(true)}
+              className="bg-purple-600 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-purple-700 transition flex items-center gap-1"
+            >
+              💬 Chat
+              {chatMessages.length > 0 && (
+                <span className="bg-red-500 text-white text-xs rounded-full px-1 ml-1">
+                  {chatMessages.length}
+                </span>
+              )}
+            </button>
+            
+            <button
+              onClick={handleGetWordHistory}
+              className="bg-orange-600 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-orange-700 transition flex items-center gap-1"
+            >
+              📚 Histórico
+            </button>
+            
             <button
               onClick={handleOpenShareModal}
-              className="bg-blue-600 text-white px-2 py-1 sm:px-3 sm:py-1 md:px-4 md:py-2 rounded text-xs sm:text-sm md:text-base hover:bg-blue-700 transition flex items-center gap-1"
+              className="bg-blue-600 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-blue-700 transition flex items-center gap-1"
             >
-              <span role="img" aria-label="compartilhar">🔗</span> Compartilhar
+              🔗 Compartilhar
             </button>
+            
             {isCurrentUserHost && !isGameStarted && (
               <button
                 onClick={handleStartGame}
-                className="bg-green-500 text-white px-2 py-1 sm:px-3 sm:py-1 md:px-4 md:py-2 rounded text-xs sm:text-sm md:text-base hover:bg-green-600 transition"
+                className="bg-green-500 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-green-600 transition"
               >
-                Iniciar Jogo
+                ▶️ Iniciar
               </button>
             )}
+            
             <button 
               onClick={handleLeaveRoom}
-              className="bg-red-500 text-white px-2 py-1 sm:px-3 sm:py-1 md:px-4 md:py-2 rounded text-xs sm:text-sm md:text-base hover:bg-red-600 transition"
+              className="bg-red-500 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-red-600 transition"
             >
-              Sair
+              🚪 Sair
             </button>
           </div>
         </div>
@@ -764,7 +938,21 @@ function Sala() {
 
         {/* Cronómetro da ronda */}
         {isGameStarted && (
-          <div className="mt-1 sm:mt-2 md:mt-4 text-base sm:text-xl md:text-2xl font-bold text-yellow-300 text-center">Tempo: {timer}s</div>
+          <div className="mt-1 sm:mt-2 md:mt-4 text-center">
+            <div className="text-base sm:text-xl md:text-2xl font-bold text-yellow-300">Tempo: {timer}s</div>
+            
+            {/* Área de dicas */}
+            {hints.length > 0 && (
+              <div className="mt-2 bg-blue-800/50 rounded-lg p-2 max-w-md mx-auto">
+                <h4 className="text-yellow-300 font-bold text-sm mb-1">💡 Dicas:</h4>
+                {hints.slice(-3).map((hint, i) => (
+                  <div key={i} className="text-yellow-200 text-xs sm:text-sm mb-1">
+                    {hint.hint}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {winnerName && (
