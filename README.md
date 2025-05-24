@@ -98,7 +98,55 @@
 - **CORS** habilitado para múltiplos domínios
 - **Sistema de salas em memória** com limpeza automática
 
-## 🔧 Instalação e Execução
+## 🚀 Deploy em Produção
+
+## 📡 Backend (Render)
+
+### Configuração Automática:
+1. **Fork do repositório** no GitHub
+2. **Conectar ao Render** (render.com)
+3. **Novo Web Service** → Conectar repositório
+4. **Configurações**:
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Root Directory**: `backend`
+
+### Variáveis de Ambiente no Render:
+```bash
+NODE_ENV=production
+FRONTEND_URL_PROD=https://arterapida.netlify.app
+MAX_PLAYERS_PER_ROOM=10
+LOG_LEVEL=info
+```
+
+## 🌐 Frontend (Netlify)
+
+### Deploy Automático:
+1. **Conectar repositório** no Netlify
+2. **Configurações de Build**:
+   - **Build command**: `npm run build`
+   - **Publish directory**: `dist`
+   - **Base directory**: `frontend`
+
+### Configuração Pronta:
+- ✅ **netlify.toml** configurado
+- ✅ **SPA redirects** implementados
+- ✅ **Headers de segurança** adicionados
+- ✅ **Variáveis de ambiente** definidas
+
+## 🔧 URLs de Produção
+- **Frontend**: https://arterapida.netlify.app
+- **Backend**: https://arterapida-backend.onrender.com
+
+## ⚙️ Verificação Pós-Deploy
+1. **Conectividade**: Testar criação e entrada em salas
+2. **WebSocket**: Verificar desenho em tempo real
+3. **Performance**: Monitorar latência do Socket.IO
+4. **CORS**: Confirmar comunicação entre domínios
+
+---
+
+# 🛠️ Instalação e Execução
 
 ### Pré-requisitos
 - Node.js 16+
