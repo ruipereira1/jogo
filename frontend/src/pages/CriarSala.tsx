@@ -80,29 +80,49 @@ function CriarSala() {
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 md:gap-4">
           <div className="flex-1">
             <label className="block text-white text-xs sm:text-sm mb-1">Rondas</label>
+            <div className="grid grid-cols-5 gap-1 mb-2">
+              {[1, 2, 3, 4, 5].map(num => (
+                <button
+                  key={num}
+                  type="button"
+                  className={`p-2 rounded text-xs sm:text-sm font-bold transition ${
+                    rounds === num 
+                      ? 'bg-yellow-300 text-blue-900 border-2 border-yellow-500' 
+                      : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                  }`}
+                  onClick={() => setRounds(num)}
+                  disabled={isLoading}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-5 gap-1 mb-2">
+              {[6, 7, 8, 9, 10].map(num => (
+                <button
+                  key={num}
+                  type="button"
+                  className={`p-2 rounded text-xs sm:text-sm font-bold transition ${
+                    rounds === num 
+                      ? 'bg-yellow-300 text-blue-900 border-2 border-yellow-500' 
+                      : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
+                  }`}
+                  onClick={() => setRounds(num)}
+                  disabled={isLoading}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs text-yellow-200 text-center">
+              {rounds <= 3 && "⚡ Partida rápida (~3-5 min)"}
+              {rounds >= 4 && rounds <= 6 && "⏱️ Partida média (~6-10 min)"}
+              {rounds >= 7 && rounds <= 10 && "🕐 Partida longa (~12-15 min)"}
+            </div>
             <input
-              className="p-2 sm:p-2 md:p-3 rounded text-blue-900 w-full text-xs sm:text-sm md:text-base"
-              type="number"
-              min={1}
-              max={10}
+              type="hidden"
               value={rounds}
-              onChange={e => {
-                const value = parseInt(e.target.value);
-                if (!isNaN(value) && value >= 1 && value <= 10) {
-                  setRounds(value);
-                } else if (e.target.value === '') {
-                  setRounds(1); // Valor padrão quando campo está vazio
-                }
-              }}
-              onBlur={e => {
-                // Garantir valor válido quando sai do campo
-                const value = parseInt(e.target.value);
-                if (isNaN(value) || value < 1 || value > 10) {
-                  setRounds(3); // Valor padrão
-                }
-              }}
               required
-              disabled={isLoading}
             />
           </div>
           

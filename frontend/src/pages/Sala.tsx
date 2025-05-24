@@ -1024,28 +1024,47 @@ function Sala() {
               {isCurrentUserHost && (
                 <div className="flex flex-col items-center gap-1 sm:gap-2 mt-2 sm:mt-4">
                   <label className="text-blue-900 font-bold text-sm sm:text-base">Número de rondas:</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={newRounds}
-                    onChange={e => {
-                      const value = parseInt(e.target.value);
-                      if (!isNaN(value) && value >= 1 && value <= 10) {
-                        setNewRounds(value);
-                      } else if (e.target.value === '') {
-                        setNewRounds(1); // Valor padrão quando campo está vazio
-                      }
-                    }}
-                    onBlur={e => {
-                      // Garantir valor válido quando sai do campo
-                      const value = parseInt(e.target.value);
-                      if (isNaN(value) || value < 1 || value > 10) {
-                        setNewRounds(3); // Valor padrão
-                      }
-                    }}
-                    className="p-1 sm:p-2 rounded text-blue-900 w-16 sm:w-24 text-center text-sm sm:text-base"
-                  />
+                  {/* Botões para seleção de rondas */}
+                  <div className="flex flex-col gap-1">
+                    <div className="grid grid-cols-5 gap-1">
+                      {[1, 2, 3, 4, 5].map(num => (
+                        <button
+                          key={num}
+                          type="button"
+                          className={`p-1 sm:p-2 rounded text-xs sm:text-sm font-bold transition min-w-8 sm:min-w-10 ${
+                            newRounds === num 
+                              ? 'bg-yellow-400 text-blue-900 border-2 border-yellow-600' 
+                              : 'bg-blue-200 text-blue-900 border-2 border-transparent hover:bg-blue-300'
+                          }`}
+                          onClick={() => setNewRounds(num)}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-5 gap-1 mb-2">
+                      {[6, 7, 8, 9, 10].map(num => (
+                        <button
+                          key={num}
+                          type="button"
+                          className={`p-1 sm:p-2 rounded text-xs sm:text-sm font-bold transition min-w-8 sm:min-w-10 ${
+                            newRounds === num 
+                              ? 'bg-yellow-400 text-blue-900 border-2 border-yellow-600' 
+                              : 'bg-blue-200 text-blue-900 border-2 border-transparent hover:bg-blue-300'
+                          }`}
+                          onClick={() => setNewRounds(num)}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Descrição da duração estimada */}
+                    <div className="text-xs text-blue-700 text-center">
+                      {newRounds <= 3 && "⚡ Partida rápida (~3-5 min)"}
+                      {newRounds >= 4 && newRounds <= 6 && "⏱️ Partida média (~6-10 min)"}
+                      {newRounds >= 7 && newRounds <= 10 && "🕐 Partida longa (~12-15 min)"}
+                    </div>
+                  </div>
                   <button
                     className="bg-green-600 text-white px-4 py-1 sm:px-6 sm:py-2 rounded-lg font-bold mt-1 sm:mt-2 hover:bg-green-700 transition text-sm sm:text-base"
                     onClick={() => {
