@@ -57,18 +57,18 @@ function CriarSala() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white p-4">
-      <h2 className="text-lg sm:text-xl md:text-2xl font-bold mb-2 sm:mb-4 md:mb-6">Criar Sala</h2>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white p-2 sm:p-4">
+      <h2 className="text-base sm:text-lg md:text-xl font-bold mb-2 sm:mb-3 md:mb-4">Criar Sala</h2>
       
       {error && (
-        <div className="bg-red-500 text-white p-2 md:p-3 rounded-lg mb-2 sm:mb-3 md:mb-4 w-full max-w-xs md:max-w-sm text-center text-xs sm:text-sm md:text-base">
+        <div className="bg-red-500 text-white p-2 rounded-lg mb-2 w-full max-w-xs text-center text-xs sm:text-sm">
           {error}
         </div>
       )}
       
-      <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:gap-3 md:gap-4 w-full max-w-xs md:max-w-sm">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:gap-3 w-full max-w-xs sm:max-w-sm">
         <input
-          className="p-2 sm:p-2 md:p-3 rounded text-blue-900 text-xs sm:text-sm md:text-base"
+          className="p-2 sm:p-3 rounded text-blue-900 text-sm"
           type="text"
           placeholder="Seu nome"
           value={nome}
@@ -77,15 +77,15 @@ function CriarSala() {
           disabled={isLoading}
         />
         
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 md:gap-4">
+        <div className="flex flex-col gap-2">
           <div className="flex-1">
-            <label className="block text-white text-xs sm:text-sm mb-1">Rondas</label>
-            <div className="grid grid-cols-5 gap-1 mb-2">
+            <label className="block text-white text-sm mb-1">Rondas</label>
+            <div className="grid grid-cols-5 gap-1 mb-1">
               {[1, 2, 3, 4, 5].map(num => (
                 <button
                   key={num}
                   type="button"
-                  className={`p-2 rounded text-xs sm:text-sm font-bold transition ${
+                  className={`p-1.5 sm:p-2 rounded text-xs font-bold transition ${
                     rounds === num 
                       ? 'bg-yellow-300 text-blue-900 border-2 border-yellow-500' 
                       : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
@@ -97,12 +97,12 @@ function CriarSala() {
                 </button>
               ))}
             </div>
-            <div className="grid grid-cols-5 gap-1 mb-2">
+            <div className="grid grid-cols-5 gap-1 mb-1">
               {[6, 7, 8, 9, 10].map(num => (
                 <button
                   key={num}
                   type="button"
-                  className={`p-2 rounded text-xs sm:text-sm font-bold transition ${
+                  className={`p-1.5 sm:p-2 rounded text-xs font-bold transition ${
                     rounds === num 
                       ? 'bg-yellow-300 text-blue-900 border-2 border-yellow-500' 
                       : 'bg-white/20 text-white border-2 border-transparent hover:bg-white/30'
@@ -115,9 +115,9 @@ function CriarSala() {
               ))}
             </div>
             <div className="text-xs text-yellow-200 text-center">
-              {rounds <= 3 && "⚡ Partida rápida (~3-5 min)"}
-              {rounds >= 4 && rounds <= 6 && "⏱️ Partida média (~6-10 min)"}
-              {rounds >= 7 && rounds <= 10 && "🕐 Partida longa (~12-15 min)"}
+              {rounds <= 3 && "⚡ Rápida (~3-5 min)"}
+              {rounds >= 4 && rounds <= 6 && "⏱️ Média (~6-10 min)"}
+              {rounds >= 7 && rounds <= 10 && "🕐 Longa (~12-15 min)"}
             </div>
             <input
               type="hidden"
@@ -127,9 +127,9 @@ function CriarSala() {
           </div>
           
           <div className="flex-1">
-            <label className="block text-white text-xs sm:text-sm mb-1">Dificuldade</label>
+            <label className="block text-white text-sm mb-1">Dificuldade</label>
             <select
-              className="p-2 sm:p-2 md:p-3 rounded text-blue-900 w-full text-xs sm:text-sm md:text-base"
+              className="p-2 sm:p-3 rounded text-blue-900 w-full text-sm"
               value={difficulty}
               onChange={e => setDifficulty(e.target.value)}
               disabled={isLoading}
@@ -146,7 +146,7 @@ function CriarSala() {
             isLoading 
               ? 'bg-gray-400 cursor-not-allowed' 
               : 'bg-yellow-300 hover:bg-yellow-400'
-          } text-blue-900 px-3 py-2 sm:px-4 sm:py-2 md:px-6 md:py-3 rounded-lg font-semibold shadow transition mt-2 text-xs sm:text-sm md:text-base`} 
+          } text-blue-900 px-4 py-2 sm:px-6 sm:py-3 rounded-lg font-semibold shadow transition mt-1 text-sm`} 
           type="submit"
           disabled={isLoading}
         >
@@ -156,7 +156,7 @@ function CriarSala() {
       
       <button 
         onClick={() => navigate('/')}
-        className="mt-4 text-white hover:underline text-xs sm:text-sm md:text-base"
+        className="mt-3 text-white hover:underline text-sm"
       >
         Voltar
       </button>

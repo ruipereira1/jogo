@@ -535,55 +535,55 @@ function Sala() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-400 text-white p-1 sm:p-2 md:p-4 overflow-x-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-400 text-white p-1 sm:p-2 overflow-x-hidden">
       {/* Indicador de conexão */}
       {connectionStatus !== 'connected' && (
-        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center py-2 z-50 text-sm">
+        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-center py-1 z-50 text-xs">
           {connectionStatus === 'reconnecting' ? '🔄 Reconectando...' : '❌ Sem conexão'}
         </div>
       )}
       
       {/* Toast de notificação */}
       {showToast && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm animate-fade-in-out">
+        <div className="fixed top-2 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-3 py-1 rounded-lg shadow-lg z-50 text-xs animate-fade-in-out">
           {toastMessage}
         </div>
       )}
       
       {/* Modal de chat */}
       {showChat && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl p-4 max-w-md w-full max-h-96 flex flex-col">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-blue-900 text-lg font-bold">Chat</h3>
-              <button onClick={() => setShowChat(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-2">
+          <div className="bg-white rounded-xl shadow-2xl p-3 max-w-sm w-full max-h-80 flex flex-col">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-blue-900 text-base font-bold">💬 Chat</h3>
+              <button onClick={() => setShowChat(false)} className="text-gray-500 hover:text-gray-700 text-lg">✕</button>
             </div>
             
-            <div className="flex-1 overflow-y-auto bg-gray-100 rounded p-2 mb-3 text-sm text-gray-800">
+            <div className="flex-1 overflow-y-auto bg-gray-100 rounded p-2 mb-2 text-xs text-gray-800">
               {chatMessages.length === 0 ? (
                 <p className="text-gray-500 text-center py-4">Sem mensagens ainda...</p>
               ) : (
                 chatMessages.map((msg, i) => (
-                  <div key={i} className="mb-2">
+                  <div key={i} className="mb-1">
                     <span className="font-semibold text-blue-900">{msg.name}</span>
-                    <span className="text-gray-500 text-xs ml-2">{formatTime(msg.timestamp)}</span>
+                    <span className="text-gray-500 text-[10px] ml-1">{formatTime(msg.timestamp)}</span>
                     <div className="text-gray-800">{msg.message}</div>
                   </div>
                 ))
               )}
             </div>
             
-            <form onSubmit={handleChatSubmit} className="flex gap-2">
+            <form onSubmit={handleChatSubmit} className="flex gap-1">
               <input
                 type="text"
                 value={chatMessage}
                 onChange={(e) => setChatMessage(e.target.value)}
                 placeholder="Digite sua mensagem..."
-                className="flex-1 p-2 border rounded text-gray-800 text-sm"
+                className="flex-1 p-2 border rounded text-gray-800 text-xs"
                 autoComplete="off"
               />
-              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-                Enviar
+              <button type="submit" className="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 text-xs">
+                ➤
               </button>
             </form>
           </div>
@@ -592,24 +592,24 @@ function Sala() {
       
       {/* Modal de histórico */}
       {showHistory && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl p-4 max-w-md w-full max-h-96 flex flex-col">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-blue-900 text-lg font-bold">Histórico de Palavras</h3>
-              <button onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-2">
+          <div className="bg-white rounded-xl shadow-2xl p-3 max-w-sm w-full max-h-80 flex flex-col">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-blue-900 text-base font-bold">📚 Histórico</h3>
+              <button onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-gray-700 text-lg">✕</button>
             </div>
             
-            <div className="flex-1 overflow-y-auto text-gray-800 text-sm">
+            <div className="flex-1 overflow-y-auto text-gray-800 text-xs">
               {wordHistory.length === 0 ? (
                 <p className="text-gray-500 text-center py-4">Nenhuma palavra ainda...</p>
               ) : (
                 wordHistory.map((item, i) => (
-                  <div key={i} className="mb-3 p-2 bg-gray-100 rounded">
+                  <div key={i} className="mb-2 p-2 bg-gray-100 rounded">
                     <div className="font-semibold">Ronda {item.round}</div>
                     <div className="text-blue-900 font-bold">{item.word}</div>
-                    <div className="text-gray-600 text-xs">Desenhista: {item.drawer}</div>
+                    <div className="text-gray-600 text-[10px]">Desenhista: {item.drawer}</div>
                     {item.guessedBy.length > 0 && (
-                      <div className="text-green-600 text-xs">Acertaram: {item.guessedBy.join(', ')}</div>
+                      <div className="text-green-600 text-[10px]">Acertaram: {item.guessedBy.join(', ')}</div>
                     )}
                   </div>
                 ))
@@ -621,37 +621,37 @@ function Sala() {
       
       {/* Modal de compartilhamento */}
       {showShareModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl p-4 sm:p-6 max-w-sm w-full relative">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-2">
+          <div className="bg-white rounded-xl shadow-2xl p-3 max-w-sm w-full relative max-h-[90vh] overflow-y-auto">
             <button 
               onClick={handleCloseShareModal}
-              className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+              className="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-lg"
             >
               ✕
             </button>
             
-            <h3 className="text-blue-900 text-lg sm:text-xl font-bold mb-3 text-center">Compartilhar Sala</h3>
+            <h3 className="text-blue-900 text-base font-bold mb-2 text-center">🔗 Compartilhar Sala</h3>
             
-            <div className="text-center mb-4">
-              <p className="text-gray-600 text-sm">Código da sala:</p>
-              <div className="bg-blue-100 text-blue-900 font-mono text-xl sm:text-2xl font-bold p-2 rounded flex justify-center items-center gap-2 mb-3">
+            <div className="text-center mb-3">
+              <p className="text-gray-600 text-xs">Código da sala:</p>
+              <div className="bg-blue-100 text-blue-900 font-mono text-lg font-bold p-2 rounded flex justify-center items-center gap-2 mb-2">
                 {roomCode}
                 <button 
                   onClick={handleCopyRoomCode}
                   className="text-blue-600 hover:text-blue-800 text-sm"
                 >
-                  <span role="img" aria-label="copiar">📋</span>
+                  📋
                 </button>
               </div>
               
-              <div className="flex flex-col space-y-2 mb-4">
-                <p className="text-gray-600 text-sm">Link direto (só precisará digitar seu nome):</p>
-                <div className="flex gap-2 justify-center">
+              <div className="flex flex-col space-y-2 mb-3">
+                <p className="text-gray-600 text-xs">Link direto:</p>
+                <div className="flex gap-1">
                   <input 
                     type="text" 
                     value={`${window.location.origin}/entrar-sala/${roomCode}`} 
                     readOnly 
-                    className="bg-gray-100 text-gray-800 p-2 rounded text-xs sm:text-sm flex-1 truncate"
+                    className="bg-gray-100 text-gray-800 p-1 rounded text-xs flex-1"
                   />
                   <button
                     onClick={() => {
@@ -667,23 +667,23 @@ function Sala() {
                         document.execCommand('copy');
                         document.body.removeChild(textArea);
                       }
-                      setToastMessage('Link direto copiado!');
+                      setToastMessage('Link copiado!');
                       setShowToast(true);
                       setTimeout(() => setShowToast(false), 3000);
                     }}
                     className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700"
                   >
-                    Copiar
+                    📋
                   </button>
                 </div>
               </div>
               
-              <div className="flex flex-col sm:flex-row justify-center gap-2 sm:gap-3">
+              <div className="flex justify-center gap-2 mb-3">
                 <button
                   onClick={handleShareWhatsApp}
-                  className="bg-green-600 text-white px-4 py-2 rounded font-medium hover:bg-green-700 transition flex items-center justify-center gap-2"
+                  className="bg-green-600 text-white px-3 py-2 rounded font-medium hover:bg-green-700 transition flex items-center justify-center gap-1 text-xs"
                 >
-                  <span role="img" aria-label="whatsapp">📱</span> WhatsApp
+                  📱 WhatsApp
                 </button>
                 {navigator.share && (
                   <button
@@ -695,35 +695,34 @@ function Sala() {
                         url: shareUrl
                       })
                       .then(() => {
-                        setToastMessage('Compartilhado com sucesso!');
+                        setToastMessage('Compartilhado!');
                         setShowToast(true);
                         setTimeout(() => setShowToast(false), 3000);
                       })
                       .catch(err => console.error('Erro ao compartilhar:', err));
                     }}
-                    className="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                    className="bg-blue-600 text-white px-3 py-2 rounded font-medium hover:bg-blue-700 transition flex items-center justify-center gap-1 text-xs"
                   >
-                    <span role="img" aria-label="share">📤</span> Compartilhar
+                    📤 Mais
                   </button>
                 )}
               </div>
               
-              <div className="mt-4">
-                <p className="text-gray-600 text-sm mb-2">Ou escaneie o QR Code:</p>
-                <div className="bg-white p-2 rounded-lg inline-block">
+              <div className="mt-3">
+                <p className="text-gray-600 text-xs mb-1">QR Code:</p>
+                <div className="bg-white p-1 rounded-lg inline-block">
                   <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`${window.location.origin}/entrar-sala/${roomCode}`)}`} 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`${window.location.origin}/entrar-sala/${roomCode}`)}`} 
                     alt="QR Code da sala" 
-                    className="w-32 h-32 sm:w-40 sm:h-40 mx-auto"
+                    className="w-24 h-24 mx-auto"
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                       const parent = e.currentTarget.parentElement;
                       if (parent) {
-                        parent.innerHTML = '<p class="text-gray-500 text-xs p-4">QR Code indisponível</p>';
+                        parent.innerHTML = '<p class="text-gray-500 text-xs p-2">QR indisponível</p>';
                       }
                     }}
                   />
-                  <p className="text-gray-500 text-xs mt-1">Aponte a câmera para entrar diretamente</p>
                 </div>
               </div>
             </div>
@@ -732,19 +731,24 @@ function Sala() {
       )}
       
       <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-2 sm:mb-4 md:mb-6 gap-1 sm:gap-2">
-          <h1 className="text-lg sm:text-xl md:text-2xl font-bold">Sala: {roomCode}</h1>
-          <span className="bg-blue-800 text-white px-2 py-1 sm:px-3 sm:py-1 md:px-4 md:py-2 rounded-lg font-semibold shadow text-xs sm:text-sm md:text-base">
-            Jogadores: {players.length}
-          </span>
-          <div className="flex gap-1 sm:gap-2 mt-1 sm:mt-0 flex-wrap">
+        <div className="flex flex-col gap-1 mb-2">
+          {/* Linha 1: Título e contador de jogadores */}
+          <div className="flex justify-between items-center">
+            <h1 className="text-base sm:text-lg font-bold">Sala: {roomCode}</h1>
+            <span className="bg-blue-800 text-white px-2 py-1 rounded text-xs font-semibold">
+              {players.length} jogador{players.length !== 1 ? 'es' : ''}
+            </span>
+          </div>
+          
+          {/* Linha 2: Botões de ação - mais compactos */}
+          <div className="flex gap-1 flex-wrap">
             <button
               onClick={() => setShowChat(true)}
-              className="bg-purple-600 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-purple-700 transition flex items-center gap-1"
+              className="bg-purple-600 text-white px-2 py-1 rounded text-xs hover:bg-purple-700 transition flex items-center gap-1"
             >
-              💬 Chat
+              💬
               {chatMessages.length > 0 && (
-                <span className="bg-red-500 text-white text-xs rounded-full px-1 ml-1">
+                <span className="bg-red-500 text-white text-[10px] rounded-full px-1">
                   {chatMessages.length}
                 </span>
               )}
@@ -752,22 +756,22 @@ function Sala() {
             
             <button
               onClick={handleGetWordHistory}
-              className="bg-orange-600 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-orange-700 transition flex items-center gap-1"
+              className="bg-orange-600 text-white px-2 py-1 rounded text-xs hover:bg-orange-700 transition"
             >
-              📚 Histórico
+              📚
             </button>
             
             <button
               onClick={handleOpenShareModal}
-              className="bg-blue-600 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-blue-700 transition flex items-center gap-1"
+              className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 transition"
             >
-              🔗 Compartilhar
+              🔗
             </button>
             
             {isCurrentUserHost && !isGameStarted && (
               <button
                 onClick={handleStartGame}
-                className="bg-green-500 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-green-600 transition"
+                className="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 transition"
               >
                 ▶️ Iniciar
               </button>
@@ -775,72 +779,59 @@ function Sala() {
             
             <button 
               onClick={handleLeaveRoom}
-              className="bg-red-500 text-white px-2 py-1 sm:px-3 sm:py-1 rounded text-xs sm:text-sm hover:bg-red-600 transition"
+              className="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600 transition ml-auto"
             >
-              🚪 Sair
+              🚪
             </button>
           </div>
         </div>
 
         {/* Layout responsivo para todos os dispositivos */}
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
-          {/* Lista de jogadores */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2 sm:p-3 md:p-4 sm:w-1/3">
-            <div className="flex justify-between items-center mb-1 sm:mb-2 md:mb-3">
-              <h2 className="font-semibold text-sm sm:text-base">Jogadores ({players.length})</h2>
-              <button
-                onClick={handleOpenShareModal}
-                className="bg-blue-600 text-white px-2 py-1 rounded text-[10px] sm:text-xs hover:bg-blue-700 transition flex items-center gap-1"
-              >
-                <span role="img" aria-label="compartilhar">🔗</span> Compartilhar
-              </button>
+        <div className="flex flex-col gap-2">
+          {/* Lista de jogadores - mais compacta */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2">
+            <div className="flex justify-between items-center mb-1">
+              <h2 className="font-semibold text-sm">Jogadores ({players.length})</h2>
+              <div className="text-xs text-yellow-200">Ronda: {round || 0}/{maxRounds || 1}</div>
             </div>
-            <ul className="space-y-1 sm:space-y-2 max-h-32 sm:max-h-none overflow-y-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 text-xs">
               {players.map(player => (
-                <li 
+                <div 
                   key={player.id} 
-                  className={`flex items-center gap-1 sm:gap-2 p-1 sm:p-2 bg-white/10 rounded ${drawerId === player.id ? 'border-2 border-yellow-300' : ''}`}
+                  className={`flex items-center justify-between p-1 bg-white/10 rounded ${drawerId === player.id ? 'border border-yellow-300' : ''}`}
                 >
-                  <span className="flex-1 truncate text-xs sm:text-sm md:text-base">{player.name}</span>
-                  <span className="text-yellow-300 text-xs sm:text-sm md:text-base">{player.score}</span>
-                  {player.isHost && (
-                    <span className="bg-yellow-300 text-blue-900 text-[10px] sm:text-xs px-1 py-0.5 rounded">HOST</span>
-                  )}
-                  {drawerId === player.id && (
-                    <span className="bg-green-300 text-blue-900 text-[10px] sm:text-xs px-1 py-0.5 rounded ml-1">✏️</span>
-                  )}
-                </li>
+                  <span className="truncate flex-1 mr-1">{player.name}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-yellow-300">{player.score}</span>
+                    {player.isHost && <span className="text-yellow-300 text-[10px]">👑</span>}
+                    {drawerId === player.id && <span className="text-green-300 text-[10px]">✏️</span>}
+                  </div>
+                </div>
               ))}
-            </ul>
-            <div className="mt-1 sm:mt-2 text-xs sm:text-sm text-yellow-200">Ronda: {round || 0}</div>
+            </div>
           </div>
 
           {/* Área principal de jogo */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2 sm:p-3 md:p-4 text-center sm:w-2/3">
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2 text-center">
             {isGameStarted ? (
               isDrawer ? (
                 <>
-                  <p className="text-sm sm:text-lg md:text-xl mb-1 sm:mb-2 text-green-300 font-bold">Você é o desenhista!</p>
-                  <p className="text-sm sm:text-lg md:text-xl mb-1 sm:mb-2 md:mb-4">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-1 sm:px-2 py-0.5 sm:py-1 rounded text-xs sm:text-sm md:text-base">{word}</span></p>
-                  
-                  {/* Seção de compartilhamento para convidar mais pessoas */}
-                  <div className="flex justify-center mb-2">
-                    <p className="text-[10px] sm:text-xs md:text-sm text-yellow-200 mr-2">Faltam jogadores?</p>
-                    <button
-                      onClick={handleOpenShareModal}
-                      className="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] sm:text-xs hover:bg-blue-700 transition flex items-center gap-1"
-                    >
-                      <span role="img" aria-label="compartilhar">🔗</span> Compartilhar
-                    </button>
+                  <div className="flex flex-col sm:flex-row justify-between items-center mb-2 gap-1">
+                    <p className="text-sm text-green-300 font-bold">Você está desenhando!</p>
+                    <p className="text-sm">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-1 py-0.5 rounded text-xs">{word}</span></p>
                   </div>
                   
-                  <div ref={canvasContainerRef} className="w-full">
+                  <div ref={canvasContainerRef} className="w-full mb-2">
                     <canvas
                       ref={canvasRef}
                       width={canvasSize.width}
                       height={canvasSize.height}
-                      className="border-2 border-yellow-300 bg-white rounded mb-2 sm:mb-4 cursor-crosshair mx-auto"
-                      style={{ touchAction: "none" }}
+                      className="border-2 border-yellow-300 bg-white rounded cursor-crosshair mx-auto"
+                      style={{ 
+                        touchAction: "none",
+                        maxWidth: "100%",
+                        height: "auto" 
+                      }}
                       onMouseDown={handleMouseDown}
                       onMouseMove={handleMouseMove}
                       onMouseUp={handleMouseUp}
@@ -852,43 +843,36 @@ function Sala() {
                   </div>
                   <button
                     onClick={handleClearCanvas}
-                    className="bg-red-500 text-white px-2 py-1 sm:px-3 sm:py-1 md:px-4 md:py-2 rounded mb-1 sm:mb-2 text-xs sm:text-sm md:text-base hover:bg-red-600 transition"
+                    className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition"
                   >
-                    Apagar
+                    🗑️ Apagar
                   </button>
-                  <p className="text-[10px] sm:text-xs md:text-sm opacity-70">Desenhe algo relacionado à palavra!</p>
                 </>
               ) : (
                 <>
-                  <p className="text-sm sm:text-lg md:text-xl mb-1 sm:mb-2 md:mb-4 text-blue-200 font-bold">Aguardando o desenho...</p>
+                  <p className="text-sm text-blue-200 font-bold mb-2">Adivinhe o desenho!</p>
                   
-                  {/* Seção de compartilhamento para convidar mais pessoas */}
-                  <div className="flex justify-center mb-2">
-                    <p className="text-[10px] sm:text-xs md:text-sm text-yellow-200 mr-2">Faltam jogadores?</p>
-                    <button
-                      onClick={handleOpenShareModal}
-                      className="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] sm:text-xs hover:bg-blue-700 transition flex items-center gap-1"
-                    >
-                      <span role="img" aria-label="compartilhar">🔗</span> Compartilhar
-                    </button>
-                  </div>
-                  
-                  <div ref={canvasContainerRef} className="w-full">
+                  <div ref={canvasContainerRef} className="w-full mb-2">
                     <canvas
                       ref={canvasRef}
                       width={canvasSize.width}
                       height={canvasSize.height}
-                      className="border-2 border-yellow-300 bg-white rounded mb-2 sm:mb-4 mx-auto"
-                      style={{ touchAction: "none", cursor: 'not-allowed' }}
+                      className="border-2 border-yellow-300 bg-white rounded mx-auto"
+                      style={{ 
+                        touchAction: "none", 
+                        cursor: 'not-allowed',
+                        maxWidth: "100%",
+                        height: "auto"
+                      }}
                     />
                   </div>
-                  <p className="text-[10px] sm:text-xs md:text-sm opacity-70">O desenho aparecerá aqui em tempo real!</p>
+                  
                   {/* Campo de palpite */}
-                  <form onSubmit={handleGuessSubmit} className="flex gap-1 sm:gap-2 mt-1 sm:mt-2 md:mt-4 justify-center">
+                  <form onSubmit={handleGuessSubmit} className="flex gap-1 mb-2">
                     <input
                       type="text"
-                      className="p-1 sm:p-2 rounded text-blue-900 w-full sm:w-64 text-xs sm:text-sm md:text-base"
-                      placeholder={guessedCorrectly ? "Você já acertou!" : "Digite seu palpite..."}
+                      className="p-1 rounded text-blue-900 flex-1 text-sm"
+                      placeholder={guessedCorrectly ? "Você acertou!" : "Digite seu palpite..."}
                       value={guess}
                       onChange={e => setGuess(e.target.value)}
                       disabled={guessedCorrectly}
@@ -896,18 +880,19 @@ function Sala() {
                     />
                     <button
                       type="submit"
-                      className="bg-yellow-300 text-blue-900 px-2 py-1 sm:px-3 sm:py-1 md:px-4 md:py-2 rounded font-semibold shadow text-xs sm:text-sm md:text-base hover:bg-yellow-400 transition"
+                      className="bg-yellow-300 text-blue-900 px-2 py-1 rounded font-semibold text-xs hover:bg-yellow-400 transition"
                       disabled={guessedCorrectly}
                     >
-                      Enviar
+                      ➤
                     </button>
                   </form>
-                  {/* Feed de palpites */}
-                  <div className="mt-1 sm:mt-2 md:mt-4 max-h-24 sm:max-h-28 md:max-h-40 overflow-y-auto bg-white/20 rounded p-1 sm:p-2 text-left text-xs sm:text-sm md:text-base">
-                    {guesses.map((g, i) => (
+                  
+                  {/* Feed de palpites - mais compacto */}
+                  <div className="max-h-20 overflow-y-auto bg-white/20 rounded p-1 text-left text-xs">
+                    {guesses.slice(-5).map((g, i) => (
                       <div key={i} className={g.correct ? "text-green-300 font-bold" : "text-white"}>
                         <span className="font-semibold">{g.name}:</span> {g.text}
-                        {g.correct && <span className="ml-1 sm:ml-2 bg-green-300 text-blue-900 px-1 py-0.5 rounded text-[10px] sm:text-xs">ACERTOU!</span>}
+                        {g.correct && <span className="ml-1 text-[10px]">✓</span>}
                       </div>
                     ))}
                   </div>
@@ -915,41 +900,32 @@ function Sala() {
               )
             ) : (
               <>
-                <p className="text-sm sm:text-lg md:text-xl mb-1 sm:mb-2 md:mb-4">Aguardando início do jogo...</p>
-                
-                {/* Seção de compartilhamento quando o jogo não começou */}
-                <div className="flex flex-col sm:flex-row justify-center items-center gap-2 mb-3">
-                  <p className="text-xs sm:text-sm">Compartilhar sala: <span className="font-bold text-yellow-300">{roomCode}</span></p>
+                <p className="text-sm mb-2">Aguardando início do jogo...</p>
+                <div className="flex justify-center items-center gap-2 text-xs">
+                  <span>Código da sala: <span className="font-bold text-yellow-300">{roomCode}</span></span>
                   <button
                     onClick={handleOpenShareModal}
-                    className="bg-blue-600 text-white px-2 py-1 rounded text-[10px] sm:text-xs hover:bg-blue-700 transition flex items-center gap-1"
+                    className="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 transition"
                   >
-                    <span role="img" aria-label="compartilhar">🔗</span> Compartilhar sala
+                    🔗
                   </button>
                 </div>
-                
-                <p className="text-[10px] sm:text-xs md:text-sm opacity-70">
-                  Em breve: o canvas de desenho e a lógica de jogo aparecerão aqui!
-                </p>
               </>
             )}
           </div>
         </div>
 
-        {/* Cronómetro da ronda */}
+        {/* Cronómetro da ronda - mais compacto */}
         {isGameStarted && (
-          <div className="mt-1 sm:mt-2 md:mt-4 text-center">
-            <div className="text-base sm:text-xl md:text-2xl font-bold text-yellow-300">Tempo: {timer}s</div>
+          <div className="mt-2 text-center">
+            <div className="text-lg font-bold text-yellow-300">⏱️ {timer}s</div>
             
-            {/* Área de dicas */}
+            {/* Área de dicas - mais compacta */}
             {hints.length > 0 && (
-              <div className="mt-2 bg-blue-800/50 rounded-lg p-2 max-w-md mx-auto">
-                <h4 className="text-yellow-300 font-bold text-sm mb-1">💡 Dicas:</h4>
-                {hints.slice(-3).map((hint, i) => (
-                  <div key={i} className="text-yellow-200 text-xs sm:text-sm mb-1">
-                    {hint.hint}
-                  </div>
-                ))}
+              <div className="mt-1 bg-blue-800/50 rounded-lg p-1 max-w-sm mx-auto">
+                <div className="text-yellow-200 text-xs">
+                  {hints.slice(-1)[0]?.hint}
+                </div>
               </div>
             )}
           </div>
@@ -1007,12 +983,12 @@ function Sala() {
 
         {/* Pódio final */}
         {podium && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/80 p-2 sm:p-4">
-            <div className="bg-yellow-300 text-blue-900 rounded-xl shadow-2xl p-4 sm:p-6 md:p-10 flex flex-col items-center animate-pulse border-4 border-white w-full max-w-xs sm:max-w-md md:max-w-lg">
-              <h2 className="text-xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-6">🏆 Pódio Final 🏆</h2>
-              <ol className="text-base sm:text-xl md:text-2xl font-bold space-y-1 sm:space-y-2 mb-2 sm:mb-4">
+          <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/80 p-2">
+            <div className="bg-yellow-300 text-blue-900 rounded-xl shadow-2xl p-3 flex flex-col items-center border-4 border-white w-full max-w-sm max-h-[90vh] overflow-y-auto">
+              <h2 className="text-lg font-extrabold mb-2">🏆 Pódio Final 🏆</h2>
+              <ol className="text-sm font-bold space-y-1 mb-2">
                 {podium.slice(0, 3).map((player, idx) => (
-                  <li key={player.id} className={idx === 0 ? 'text-xl sm:text-2xl md:text-4xl text-yellow-600' : idx === 1 ? 'text-lg sm:text-xl md:text-3xl text-gray-700' : 'text-base sm:text-lg md:text-2xl text-orange-700'}>
+                  <li key={player.id} className={idx === 0 ? 'text-lg text-yellow-600' : idx === 1 ? 'text-base text-gray-700' : 'text-sm text-orange-700'}>
                     {idx === 0 && '🥇 '}
                     {idx === 1 && '🥈 '}
                     {idx === 2 && '🥉 '}
@@ -1020,10 +996,10 @@ function Sala() {
                   </li>
                 ))}
               </ol>
-              <div className="text-sm sm:text-base md:text-lg mt-1 sm:mt-2 mb-2 sm:mb-4">Parabéns a todos!</div>
+              <div className="text-xs mb-2">Parabéns a todos!</div>
               {isCurrentUserHost && (
-                <div className="flex flex-col items-center gap-1 sm:gap-2 mt-2 sm:mt-4">
-                  <label className="text-blue-900 font-bold text-sm sm:text-base">Número de rondas:</label>
+                <div className="flex flex-col items-center gap-1 mt-2">
+                  <label className="text-blue-900 font-bold text-sm">Número de rondas:</label>
                   {/* Botões para seleção de rondas */}
                   <div className="flex flex-col gap-1">
                     <div className="grid grid-cols-5 gap-1">
@@ -1031,7 +1007,7 @@ function Sala() {
                         <button
                           key={num}
                           type="button"
-                          className={`p-1 sm:p-2 rounded text-xs sm:text-sm font-bold transition min-w-8 sm:min-w-10 ${
+                          className={`p-1 rounded text-xs font-bold transition min-w-6 ${
                             newRounds === num 
                               ? 'bg-yellow-400 text-blue-900 border-2 border-yellow-600' 
                               : 'bg-blue-200 text-blue-900 border-2 border-transparent hover:bg-blue-300'
@@ -1042,12 +1018,12 @@ function Sala() {
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-5 gap-1 mb-2">
+                    <div className="grid grid-cols-5 gap-1 mb-1">
                       {[6, 7, 8, 9, 10].map(num => (
                         <button
                           key={num}
                           type="button"
-                          className={`p-1 sm:p-2 rounded text-xs sm:text-sm font-bold transition min-w-8 sm:min-w-10 ${
+                          className={`p-1 rounded text-xs font-bold transition min-w-6 ${
                             newRounds === num 
                               ? 'bg-yellow-400 text-blue-900 border-2 border-yellow-600' 
                               : 'bg-blue-200 text-blue-900 border-2 border-transparent hover:bg-blue-300'
@@ -1060,13 +1036,13 @@ function Sala() {
                     </div>
                     {/* Descrição da duração estimada */}
                     <div className="text-xs text-blue-700 text-center">
-                      {newRounds <= 3 && "⚡ Partida rápida (~3-5 min)"}
-                      {newRounds >= 4 && newRounds <= 6 && "⏱️ Partida média (~6-10 min)"}
-                      {newRounds >= 7 && newRounds <= 10 && "🕐 Partida longa (~12-15 min)"}
+                      {newRounds <= 3 && "⚡ Rápida (~3-5 min)"}
+                      {newRounds >= 4 && newRounds <= 6 && "⏱️ Média (~6-10 min)"}
+                      {newRounds >= 7 && newRounds <= 10 && "🕐 Longa (~12-15 min)"}
                     </div>
                   </div>
                   <button
-                    className="bg-green-600 text-white px-4 py-1 sm:px-6 sm:py-2 rounded-lg font-bold mt-1 sm:mt-2 hover:bg-green-700 transition text-sm sm:text-base"
+                    className="bg-green-600 text-white px-4 py-1 rounded-lg font-bold mt-1 hover:bg-green-700 transition text-sm"
                     onClick={() => {
                       // Validar antes de enviar
                       const rounds = newRounds && newRounds >= 1 && newRounds <= 10 ? newRounds : 3;
@@ -1074,15 +1050,15 @@ function Sala() {
                       setPodium(null);
                     }}
                   >
-                    Iniciar nova partida
+                    Nova partida
                   </button>
                 </div>
               )}
               {!isCurrentUserHost && (
-                <div className="text-blue-900 font-bold mt-2 sm:mt-4 text-sm sm:text-base">Aguardando o host iniciar uma nova partida...</div>
+                <div className="text-blue-900 font-bold mt-2 text-sm text-center">Aguardando o host iniciar nova partida...</div>
               )}
               <button
-                className="bg-red-600 text-white px-4 py-1 sm:px-6 sm:py-2 rounded-lg font-bold mt-3 sm:mt-6 hover:bg-red-700 transition text-sm sm:text-base"
+                className="bg-red-600 text-white px-4 py-1 rounded-lg font-bold mt-2 hover:bg-red-700 transition text-sm"
                 onClick={handleLeaveRoom}
               >
                 Sair
