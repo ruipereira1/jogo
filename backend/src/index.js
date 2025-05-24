@@ -9,33 +9,59 @@ const { WORDS_FACIL, WORDS_MEDIO, WORDS_DIFICIL, getRandomWord } = require('./wo
 
 const app = express();
 const server = http.createServer(app);
+
+// Configuração de CORS mais permissiva para debug
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Em desenvolvimento, permite qualquer origem
+    if (!origin) return callback(null, true);
+    
+    // Lista de origens permitidas
+    const allowedOrigins = [
+      'https://desenharapido.netlify.app',
+      'https://jogo-0vuq.onrender.com', 
+      'https://arte-rapida.onrender.com',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:3000'
+    ];
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Log da origem para debug
+    console.log('CORS - Origem não permitida:', origin);
+    return callback(null, true); // Permite temporariamente para debug
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with']
+};
+
 const io = socketIo(server, {
-  cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? [
-          "https://desenharapido.netlify.app", 
-          "https://jogo-arte-rapida.onrender.com", 
-          "https://arte-rapida.onrender.com",
-          "https://arterapida-backend-production.up.railway.app"
-        ] 
-      : ["http://localhost:5173", "http://127.0.0.1:5173"],
-    methods: ["GET", "POST"],
-    credentials: true
-  }
+  cors: corsOptions
 });
 
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? [
-        "https://desenharapido.netlify.app", 
-        "https://jogo-arte-rapida.onrender.com", 
-        "https://arte-rapida.onrender.com",
-        "https://arterapida-backend-production.up.railway.app"
-      ]
-    : ["http://localhost:5173", "http://127.0.0.1:5173"],
-  credentials: true
-}));
+// Middleware
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// Log middleware para debug
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${req.get('Origin')}`);
+  next();
+});
+
+// Rota de health check
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    message: 'Servidor ArteRápida funcionando!',
+    cors: 'enabled'
+  });
+});
 
 // Servir arquivos estáticos em produção
 if (process.env.NODE_ENV === 'production') {
@@ -49,7 +75,10 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.get('/', (req, res) => {
-  res.send('Servidor ArteRápida a funcionar!');
+  res.json({ 
+    message: 'Servidor ArteRápida a funcionar!',
+    cors: 'enabled'
+  });
 });
 
 // Armazenamento das salas (em memória, para simplificar)
