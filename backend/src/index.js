@@ -12,7 +12,12 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production' 
-      ? ["https://jogo-arte-rapida.onrender.com", "https://arte-rapida.onrender.com"] 
+      ? [
+          "https://desenharapido.netlify.app", 
+          "https://jogo-arte-rapida.onrender.com", 
+          "https://arte-rapida.onrender.com",
+          "https://arterapida-backend-production.up.railway.app"
+        ] 
       : ["http://localhost:5173", "http://127.0.0.1:5173"],
     methods: ["GET", "POST"],
     credentials: true
@@ -21,7 +26,12 @@ const io = socketIo(server, {
 
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ["https://jogo-arte-rapida.onrender.com", "https://arte-rapida.onrender.com"]
+    ? [
+        "https://desenharapido.netlify.app", 
+        "https://jogo-arte-rapida.onrender.com", 
+        "https://arte-rapida.onrender.com",
+        "https://arterapida-backend-production.up.railway.app"
+      ]
     : ["http://localhost:5173", "http://127.0.0.1:5173"],
   credentials: true
 }));
