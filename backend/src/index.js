@@ -96,6 +96,12 @@ function normalizeText(text) {
 
 // Função para iniciar uma nova ronda
 function startRound(room, io) {
+  // Verificar se a sala ainda existe e tem jogadores
+  if (!room || !room.players || room.players.length === 0) {
+    console.error('Tentativa de iniciar ronda em sala inválida ou vazia');
+    return;
+  }
+
   // Countdown antes de começar a ronda
   let countdown = 3;
   io.to(room.id).emit('countdown', { value: countdown, round: room.round, maxRounds: room.maxRounds });
@@ -104,6 +110,13 @@ function startRound(room, io) {
     io.to(room.id).emit('countdown', { value: countdown, round: room.round, maxRounds: room.maxRounds });
     if (countdown <= 0) {
       clearInterval(countdownInterval);
+      
+      // Verificar novamente se ainda há jogadores na sala
+      if (!room.players || room.players.length === 0) {
+        console.error('Sala ficou vazia durante countdown');
+        return;
+      }
+      
       // Limpar o canvas para todos
       io.to(room.id).emit('clear-canvas');
       // Sorteia o desenhista (evitar repetir o anterior se possível)
@@ -111,8 +124,21 @@ function startRound(room, io) {
       if (room.currentDrawer && room.players.length > 1) {
         possibleDrawers = possibleDrawers.filter(id => id !== room.currentDrawer);
       }
+      
+      if (possibleDrawers.length === 0) {
+        console.error('Nenhum drawer disponível');
+        return;
+      }
+      
       const drawerId = possibleDrawers[Math.floor(Math.random() * possibleDrawers.length)];
       const drawer = room.players.find(p => p.id === drawerId);
+      
+      // Verificar se o drawer foi encontrado
+      if (!drawer) {
+        console.error('Drawer não encontrado:', drawerId);
+        return;
+      }
+      
       room.currentDrawer = drawer.id;
       // Sorteia a palavra conforme dificuldade
       let wordList = WORDS_FACIL;
@@ -157,6 +183,12 @@ function startRound(room, io) {
       const maxHints = 3;
       
       room.timerInterval = setInterval(() => {
+        // Verificar se a sala ainda existe
+        if (!room || !room.players || room.players.length === 0) {
+          clearInterval(room.timerInterval);
+          return;
+        }
+        
         timeLeft--;
         room._lastTimeLeft = timeLeft;
         io.to(room.id).emit('timer-update', { timeLeft });
@@ -196,9 +228,22 @@ function startRound(room, io) {
 
 // Função para avançar ronda ou terminar
 function nextRoundOrEnd(room, io) {
+  // Verificar se a sala ainda existe e tem jogadores
+  if (!room || !room.players || room.players.length === 0) {
+    console.error('Tentativa de avançar ronda em sala inválida ou vazia');
+    return;
+  }
+
   if (room.round < room.maxRounds) {
     room.round++;
-    setTimeout(() => startRound(room, io), 5000); // Espera 5s antes de nova ronda
+    setTimeout(() => {
+      // Verificar novamente se a sala ainda existe antes de iniciar nova ronda
+      if (room && room.players && room.players.length > 0) {
+        startRound(room, io);
+      } else {
+        console.error('Sala não existe mais para iniciar nova ronda');
+      }
+    }, 5000); // Espera 5s antes de nova ronda
   } else {
     room.status = 'finished';
     io.to(room.id).emit('game-ended', { players: room.players });
@@ -368,9 +413,13 @@ io.on('connection', (socket) => {
         
         // Se o host saiu, passar o controle para outro jogador
         if (room.host === socket.id) {
-          room.host = room.players[0].id;
-          room.players[0].isHost = true;
-          console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
+          if (room.players.length > 0) {
+            room.host = room.players[0].id;
+            room.players[0].isHost = true;
+            console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
+          } else {
+            console.log(`Sala ${roomCode} ficou sem jogadores após saída do host`);
+          }
         }
         
         // Se o desenhista atual saiu durante uma ronda ativa, terminar a ronda
@@ -469,7 +518,11 @@ io.on('connection', (socket) => {
       if (player) player.score += playerPoints;
       // Desenhista ganha sempre 5 pontos fixos
       const drawer = room.players.find(p => p.id === room.currentDrawer);
-      if (drawer) drawer.score += drawerPoints;
+      if (drawer) {
+        drawer.score += drawerPoints;
+      } else {
+        console.warn('Drawer não encontrado para adicionar pontos');
+      }
       // Atualizar todos os jogadores com a nova lista de pontuações
       io.to(roomCode).emit('players-update', {
         players: room.players,
