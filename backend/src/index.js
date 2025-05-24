@@ -1,49 +1,24 @@
-import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-import { 
-  generateRoomCode, 
-  startRound, 
-  nextRoundOrEnd,
-  handlePlayerLeaveDuringGame,
-  handlePlayerJoinDuringGame,
-  pauseGame,
-  resumeGame,
-  promoteSpectatorToPlayer,
-  checkGameContinuity
-} from './gameController.js';
-import { normalizeText, validateUserName, validateRoomCode, cleanupRoomTimeout } from './utils.js';
-import { rateLimit, validateSocketData, sanitizeMessage } from './middleware.js';
-import { Logger, getServerStats } from './logger.js';
-
-const allowedOrigins = [
-  process.env.FRONTEND_URL_PROD || "https://desenharapido.netlify.app",
-  ...(process.env.FRONTEND_URL_DEV?.split(',') || ["http://localhost:3000", "http://localhost:5173"])
-];
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: ["https://desenharapido.netlify.app", "http://localhost:3000", "http://localhost:5173"],
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: ["https://desenharapido.netlify.app", "http://localhost:3000", "http://localhost:5173"],
   credentials: true
 }));
-
 app.get('/', (req, res) => {
   res.send('Servidor ArteRápida a funcionar!');
-});
-
-app.get('/stats', (req, res) => {
-  res.json(getServerStats(rooms));
 });
 
 // Armazenamento das salas (em memória, para simplificar)
@@ -287,39 +262,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Entrar em sala - MELHORADO
+  // Entrar em sala
   socket.on('join-room', ({ userName, roomCode }, callback) => {
     try {
-      // Rate limiting
-      if (!rateLimit(socket.id, 10, 60000)) {
-        return callback({ success: false, error: 'Muitas tentativas. Tente novamente em alguns segundos.' });
-      }
-      
-      // Validações
-      if (!validateUserName(userName)) {
-        return callback({ success: false, error: 'Nome inválido' });
-      }
-      
-      if (!validateRoomCode(roomCode)) {
-        return callback({ success: false, error: 'Código de sala inválido' });
-      }
-      
       const room = rooms.get(roomCode);
       
       if (!room) {
         io.emit('room-not-found', { roomCode });
         return callback({ success: false, error: 'Sala não encontrada' });
       }
-      
-      // Verificar se nome já existe na sala
-      const nameExists = room.players.some(p => p.name.toLowerCase() === userName.toLowerCase());
-      if (nameExists) {
-        return callback({ success: false, error: 'Nome já em uso nesta sala' });
-      }
-      
-      // Verificar limite de jogadores (incluindo espectadores)
-      if (room.players.length >= 10) {
-        return callback({ success: false, error: 'Sala cheia (máximo 10 jogadores)' });
+
+      if (room.status !== 'waiting') {
+        return callback({ success: false, error: 'Jogo já iniciado' });
       }
 
       // Se a sala estava vazia e marcada para deleção, cancelar
@@ -327,7 +281,23 @@ io.on('connection', (socket) => {
         clearTimeout(room.deleteTimeout);
         room.deleteTimeout = null;
         room.isEmpty = false;
-        Logger.info(`Sala ${roomCode} reativada por ${userName}. Deleção cancelada.`);
+        console.log(`Sala ${roomCode} reativada por ${userName}. Deleção cancelada.`);
+      }
+
+      // Determinar se será o host (se sala estava vazia)
+      const isHost = room.players.length === 0;
+
+      // Adicionar jogador à sala
+      room.players.push({
+        id: socket.id,
+        name: userName,
+        score: 0,
+        isHost: isHost
+      });
+
+      // Se for o host, definir como tal
+      if (isHost) {
+        room.host = socket.id;
       }
 
       // Associar o socket à sala
@@ -335,31 +305,23 @@ io.on('connection', (socket) => {
       socket.data.roomCode = roomCode;
       socket.data.userName = userName;
 
-      // Determinar se será o host (se sala estava vazia)
-      const isHost = room.players.length === 0;
+      console.log(`${userName} entrou na sala ${roomCode}${isHost ? ' como novo host' : ''}`);
       
-      // Se for o host, definir como tal
-      if (isHost) {
-        room.host = socket.id;
-      }
-
-      // Usar nova função para gerir entrada durante jogo
-      handlePlayerJoinDuringGame(room, socket.id, userName, io);
-
-      Logger.info(`${userName} entrou na sala ${roomCode}${isHost ? ' como novo host' : ''}${room.status === 'playing' ? ' como espectador' : ''}`);
-
-      callback({ 
-        success: true, 
-        isSpectator: room.status === 'playing',
-        gameStatus: room.status
+      // Notificar todos na sala sobre o novo jogador
+      io.to(roomCode).emit('player-joined', {
+        playerId: socket.id,
+        playerName: userName,
+        players: room.players
       });
+
+      callback({ success: true });
     } catch (error) {
-      Logger.error('Erro ao entrar na sala:', error);
+      console.error('Erro ao entrar na sala:', error);
       callback({ success: false, error: 'Erro ao entrar na sala' });
     }
   });
 
-  // Quando um jogador se desconecta - MELHORADO
+  // Quando um jogador se desconecta
   socket.on('disconnect', () => {
     try {
       const roomCode = socket.data.roomCode;
@@ -367,24 +329,20 @@ io.on('connection', (socket) => {
 
       if (roomCode && rooms.has(roomCode)) {
         const room = rooms.get(roomCode);
-        const playerBefore = room.players.find(p => p.id === socket.id);
-        
-        // Usar nova função para gerir saída durante jogo
-        if (room.status === 'playing' || room.status === 'paused') {
-          handlePlayerLeaveDuringGame(room, socket.id, userName, io);
-        }
         
         // Remover jogador da sala
         room.players = room.players.filter(player => player.id !== socket.id);
         
-        Logger.info(`${userName || socket.id} saiu da sala ${roomCode}`);
+        console.log(`${userName || socket.id} saiu da sala ${roomCode}`);
         
         // Se não sobrou ninguém, marcar para deletar após 10 minutos
         if (room.players.length === 0) {
-          Logger.info(`Sala ${roomCode} ficou vazia. Será deletada em 10 minutos se ninguém entrar.`);
+          console.log(`Sala ${roomCode} ficou vazia. Será deletada em 10 minutos se ninguém entrar.`);
           
-          // Limpar timers da sala
-          cleanupRoomTimeout(room);
+          // Cancelar timeout anterior se existir
+          if (room.deleteTimeout) {
+            clearTimeout(room.deleteTimeout);
+          }
           
           // Marcar sala como vazia e definir timeout para deleção
           room.isEmpty = true;
@@ -392,7 +350,7 @@ io.on('connection', (socket) => {
           room.deleteTimeout = setTimeout(() => {
             if (rooms.has(roomCode) && room.players.length === 0) {
               rooms.delete(roomCode);
-              Logger.info(`Sala ${roomCode} deletada após 10 minutos vazia`);
+              console.log(`Sala ${roomCode} deletada após 10 minutos vazia`);
               io.emit('room-deleted', { roomCode });
             }
           }, 10 * 60 * 1000); // 10 minutos
@@ -405,24 +363,49 @@ io.on('connection', (socket) => {
           clearTimeout(room.deleteTimeout);
           room.deleteTimeout = null;
           room.isEmpty = false;
-          Logger.info(`Sala ${roomCode} não está mais vazia. Deleção cancelada.`);
+          console.log(`Sala ${roomCode} não está mais vazia. Deleção cancelada.`);
         }
         
-        // Verificar continuidade do jogo
-        checkGameContinuity(room, io);
+        // Se o host saiu, passar o controle para outro jogador
+        if (room.host === socket.id) {
+          room.host = room.players[0].id;
+          room.players[0].isHost = true;
+          console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
+        }
+        
+        // Se o desenhista atual saiu durante uma ronda ativa, terminar a ronda
+        if (room.currentDrawer === socket.id && room.status === 'playing') {
+          console.log(`Desenhista ${userName} saiu durante a ronda. Terminando ronda automaticamente.`);
+          
+          // Parar o timer da ronda atual
+          if (room.timerInterval) {
+            clearInterval(room.timerInterval);
+          }
+          
+          // Notificar que a ronda terminou por saída do desenhista
+          io.to(roomCode).emit('round-ended', { 
+            reason: 'drawer-left',
+            message: `${userName} (desenhista) saiu da sala. Avançando para próxima ronda...`
+          });
+          
+          // Resetar currentDrawer e currentWord
+          room.currentDrawer = null;
+          room.currentWord = null;
+          
+          // Avançar para próxima ronda após 3 segundos
+          setTimeout(() => nextRoundOrEnd(room, io), 3000);
+        }
         
         // Notificar os jogadores restantes
         io.to(roomCode).emit('player-left', {
           playerId: socket.id,
-          playerName: userName,
-          players: room.players,
-          wasSpectator: playerBefore?.isSpectator || false
+          players: room.players
         });
       }
       
-      Logger.debug('Usuário desconectado:', socket.id);
+      console.log('Usuário desconectado:', socket.id);
     } catch (error) {
-      Logger.error('Erro ao lidar com desconexão:', error);
+      console.error('Erro ao lidar com desconexão:', error);
     }
   });
 
@@ -469,7 +452,16 @@ io.on('connection', (socket) => {
       }
       
       // Calcular pontos com base no tempo restante
-      let timeLeft = room._lastTimeLeft || 0;
+      let timeLeft = 0;
+      if (room.timerInterval && room.timePerRound) {
+        // Encontrar o tempo restante do último timer-update enviado
+        // Como não guardamos o timeLeft, vamos estimar pelo tempoPerRound e pelo round
+        // Melhor: guardar timeLeft no room a cada timer-update
+        // (Implementação rápida: guardar timeLeft no room)
+      }
+      // Se não existir, usar 0
+      timeLeft = room._lastTimeLeft || 0;
+      // Pontuação: 10 + (tempoRestante / 5) para quem acerta
       const playerPoints = 10 + Math.floor(timeLeft / 5);
       const drawerPoints = 5;
       // Jogador que acertou ganha pontos proporcionais ao tempo
@@ -489,7 +481,7 @@ io.on('connection', (socket) => {
       // Avançar para próxima ronda ou terminar
       if (room.timerInterval) clearInterval(room.timerInterval);
       io.to(roomCode).emit('round-ended', { reason: 'guessed' });
-      setTimeout(() => nextRoundOrEnd(room, io), 3000);
+      setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
     }
   });
 
@@ -550,158 +542,6 @@ io.on('connection', (socket) => {
     console.log(`Partida reiniciada na sala ${roomCode} com ${validRounds} rondas`);
     io.to(roomCode).emit('game-restarted');
     startRound(room, io);
-  });
-
-  // NOVOS EVENTOS PARA GESTÃO MELHORADA
-
-  // Promover espectador a jogador
-  socket.on('promote-spectator', ({ roomCode, playerId }, callback) => {
-    try {
-      const room = rooms.get(roomCode);
-      if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
-      }
-      
-      // Verificar se quem está promovendo é o host
-      if (room.host !== socket.id) {
-        return callback({ success: false, error: 'Apenas o anfitrião pode promover espectadores' });
-      }
-      
-      const success = promoteSpectatorToPlayer(room, playerId, io);
-      callback({ success });
-    } catch (error) {
-      Logger.error('Erro ao promover espectador:', error);
-      callback({ success: false, error: 'Erro interno' });
-    }
-  });
-
-  // Pausar jogo manualmente
-  socket.on('pause-game', ({ roomCode, reason }, callback) => {
-    try {
-      const room = rooms.get(roomCode);
-      if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
-      }
-      
-      // Verificar se quem está pausando é o host
-      if (room.host !== socket.id) {
-        return callback({ success: false, error: 'Apenas o anfitrião pode pausar o jogo' });
-      }
-      
-      if (room.status !== 'playing') {
-        return callback({ success: false, error: 'Jogo não está em andamento' });
-      }
-      
-      pauseGame(room, io, reason || 'Jogo pausado pelo anfitrião');
-      Logger.info(`Jogo pausado manualmente na sala ${roomCode} por ${socket.data.userName}`);
-      callback({ success: true });
-    } catch (error) {
-      Logger.error('Erro ao pausar jogo:', error);
-      callback({ success: false, error: 'Erro interno' });
-    }
-  });
-
-  // Retomar jogo manualmente
-  socket.on('resume-game', ({ roomCode }, callback) => {
-    try {
-      const room = rooms.get(roomCode);
-      if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
-      }
-      
-      // Verificar se quem está retomando é o host
-      if (room.host !== socket.id) {
-        return callback({ success: false, error: 'Apenas o anfitrião pode retomar o jogo' });
-      }
-      
-      if (room.status !== 'paused') {
-        return callback({ success: false, error: 'Jogo não está pausado' });
-      }
-      
-      const activePlayers = room.players.filter(p => !p.isSpectator);
-      if (activePlayers.length < 2) {
-        return callback({ success: false, error: 'Mínimo 2 jogadores ativos necessários' });
-      }
-      
-      resumeGame(room, io);
-      Logger.info(`Jogo retomado manualmente na sala ${roomCode} por ${socket.data.userName}`);
-      callback({ success: true });
-    } catch (error) {
-      Logger.error('Erro ao retomar jogo:', error);
-      callback({ success: false, error: 'Erro interno' });
-    }
-  });
-
-  // Cancelar jogo atual
-  socket.on('cancel-game', ({ roomCode }, callback) => {
-    try {
-      const room = rooms.get(roomCode);
-      if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
-      }
-      
-      // Verificar se quem está cancelando é o host
-      if (room.host !== socket.id) {
-        return callback({ success: false, error: 'Apenas o anfitrião pode cancelar o jogo' });
-      }
-      
-      if (room.status === 'waiting') {
-        return callback({ success: false, error: 'Jogo ainda não foi iniciado' });
-      }
-      
-      // Limpar timers
-      cleanupRoomTimeout(room);
-      
-      // Resetar estado da sala
-      room.status = 'waiting';
-      room.round = 0;
-      room.currentDrawer = null;
-      room.currentWord = null;
-      room.wordHistory = [];
-      
-      // Resetar pontuações e remover flag de espectador
-      room.players.forEach(player => {
-        player.score = 0;
-        player.isSpectator = false;
-      });
-      
-      io.to(roomCode).emit('game-cancelled', {
-        message: 'Jogo cancelado pelo anfitrião',
-        players: room.players
-      });
-      
-      Logger.info(`Jogo cancelado na sala ${roomCode} por ${socket.data.userName}`);
-      callback({ success: true });
-    } catch (error) {
-      Logger.error('Erro ao cancelar jogo:', error);
-      callback({ success: false, error: 'Erro interno' });
-    }
-  });
-
-  // Obter estado atual da sala
-  socket.on('get-room-state', ({ roomCode }, callback) => {
-    try {
-      const room = rooms.get(roomCode);
-      if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
-      }
-      
-      callback({
-        success: true,
-        state: {
-          status: room.status,
-          round: room.round,
-          maxRounds: room.maxRounds,
-          players: room.players,
-          currentDrawer: room.currentDrawer,
-          timeLeft: room._lastTimeLeft || 0,
-          pauseReason: room.pauseReason || null
-        }
-      });
-    } catch (error) {
-      Logger.error('Erro ao obter estado da sala:', error);
-      callback({ success: false, error: 'Erro interno' });
-    }
   });
 });
 

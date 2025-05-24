@@ -1,12 +1,10 @@
 import { io, Socket } from 'socket.io-client';
 
-// Configurar URL do backend baseada no ambiente
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 
-  (import.meta.env.PROD 
-    ? 'https://jogo-0vuq.onrender.com'
-    : 'http://localhost:4000');
-
-let socket: Socket;
+// Usa a URL de produção quando o app estiver rodando no Netlify, caso contrário usa localhost
+const isProduction = window.location.hostname !== 'localhost';
+const SOCKET_URL = isProduction
+  ? 'https://jogo-0vuq.onrender.com'
+  : 'http://localhost:4000';
 
 class SocketService {
   private socket: Socket | null = null;
@@ -14,7 +12,7 @@ class SocketService {
 
   connect() {
     if (!this.socket) {
-      this.socket = io(BACKEND_URL);
+      this.socket = io(SOCKET_URL);
       
       this.socket.on('connect', () => {
         console.log('Conectado ao servidor!');
