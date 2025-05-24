@@ -12,7 +12,7 @@ services:
       - key: PORT
         generateValue: true
       - key: FRONTEND_URL_PROD
-        value: https://arterapida.netlify.app
+        value: https://desenharapido.netlify.app
       - key: MAX_PLAYERS_PER_ROOM
         value: 10
       - key: LOG_LEVEL
