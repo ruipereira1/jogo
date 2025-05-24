@@ -1,22 +1,43 @@
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
-import cors from 'cors';
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
+const path = require('path');
+
+// Importar banco de palavras
+const { WORDS_FACIL, WORDS_MEDIO, WORDS_DIFICIL, getRandomWord } = require('./words');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
+const io = socketIo(server, {
   cors: {
-    origin: ["https://desenharapido.netlify.app", "http://localhost:3000", "http://localhost:5173"],
-    methods: ['GET', 'POST'],
+    origin: process.env.NODE_ENV === 'production' 
+      ? ["https://jogo-arte-rapida.onrender.com", "https://arte-rapida.onrender.com"] 
+      : ["http://localhost:5173", "http://127.0.0.1:5173"],
+    methods: ["GET", "POST"],
     credentials: true
   }
 });
 
 app.use(cors({
-  origin: ["https://desenharapido.netlify.app", "http://localhost:3000", "http://localhost:5173"],
+  origin: process.env.NODE_ENV === 'production' 
+    ? ["https://jogo-arte-rapida.onrender.com", "https://arte-rapida.onrender.com"]
+    : ["http://localhost:5173", "http://127.0.0.1:5173"],
   credentials: true
 }));
+app.use(express.json());
+
+// Servir arquivos estáticos em produção
+if (process.env.NODE_ENV === 'production') {
+  // Servir arquivos estáticos do React
+  app.use(express.static(path.join(__dirname, '../../frontend/dist')));
+  
+  // Todas as rotas que não são da API devem retornar o index.html
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../../frontend/dist', 'index.html'));
+  });
+}
+
 app.get('/', (req, res) => {
   res.send('Servidor ArteRápida a funcionar!');
 });
@@ -56,22 +77,8 @@ setInterval(() => {
 // }
 // E adicionar opção no create-room: { category: 'ANIMAIS' ou 'RANDOM' para misturar todas }
 
-// Listas de palavras em português de Portugal por dificuldade
-const WORDS_FACIL = [
-  'cão', 'gato', 'carro', 'casa', 'árvore', 'livro', 'bola', 'pato', 'copo', 'flor', 'sol', 'lua', 'estrela', 'fogo', 'mesa', 'porta', 'sapato', 'peixe', 'pão', 'cadeira', 'telemóvel', 'metro', 'autocarro', 'comboio', 'praia', 'pastel', 'mota', 'café', 'bica', 'chuva', 'elétrico', 'óculos', 'gelo', 'passeio', 'rua'
-];
-const WORDS_MEDIO = [
-  'computador', 'bicicleta', 'telefone', 'avião', 'montanha', 'foguetão', 'janela', 'escada', 'cascata', 'baleia', 'tartaruga', 'girassol', 'almofada', 'escorrega', 'buzina', 'tenda', 'escorpião', 'bule', 'bolacha', 'bateria', 'pequeno-almoço', 'frigorífico', 'autocarro', 'passadeira', 'farmácia', 'eléctrico', 'império', 'francesinha', 'bacalhau', 'azulejo', 'portagem', 'gasolineira', 'talho', 'autocarro', 'camioneta', 'bicharoco'
-];
-const WORDS_DIFICIL = [
-  'microscópio', 'paralelepípedo', 'ornitorrinco', 'helicóptero', 'canguru', 'escaravelho', 'anfíbio', 'estetoscópio', 'circuito', 'criptografia', 'maracujá', 'turbilhão', 'girassol', 'crocodilo', 'escafandro', 'bumerangue', 'trombone', 'saxofone', 'candelabro', 'ampulheta', 'otorrinolaringologista', 'eletrocardiograma', 'descodificador', 'pneumoultramicroscopicossilicovulcanoconiótico', 'hipopotomonstrosesquipedaliofobia', 'descentralização', 'constitucionalidade', 'multidisciplinaridade', 'fotossensibilidade', 'inconstitucionalissimamente'
-];
-
-// NOTA: Implementação futura - Sistema de dicas:
-// Quando o tempo estiver a acabar, podemos mostrar parte da palavra:
-// 1. Quando faltar 30s: mostrar o número de letras (ex: _ _ _ _ _ _)
-// 2. Quando faltar 20s: mostrar a primeira letra (ex: C _ _ _ _ _)
-// 3. Quando faltar 10s: mostrar mais uma letra aleatória (ex: C _ Ç _ _ _)
+// Listas de palavras são importadas do ficheiro words.js
+// As listas incluem agora centenas de palavras organizadas por categoria!
 
 // Função para gerar código aleatório de 6 caracteres
 function generateRoomCode() {
@@ -140,11 +147,8 @@ function startRound(room, io) {
       }
       
       room.currentDrawer = drawer.id;
-      // Sorteia a palavra conforme dificuldade
-      let wordList = WORDS_FACIL;
-      if (room.difficulty === 'medio') wordList = WORDS_MEDIO;
-      if (room.difficulty === 'dificil') wordList = WORDS_DIFICIL;
-      const word = wordList[Math.floor(Math.random() * wordList.length)];
+      // Sorteia a palavra conforme dificuldade usando o novo sistema
+      const word = getRandomWord(room.difficulty || 'facil');
       room.currentWord = word;
       
       // Adicionar palavra ao histórico
