@@ -52,6 +52,7 @@ function Sala() {
   const [showHistory, setShowHistory] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
+  const [isHorizontalMode, setIsHorizontalMode] = useState(false);
 
   // Adicionar viewport meta tag para mobile através do useEffect
   useEffect(() => {
@@ -77,19 +78,26 @@ function Sala() {
   const updateCanvasSize = () => {
     if (canvasContainerRef.current) {
       const containerWidth = canvasContainerRef.current.clientWidth;
-      // Em telas menores, usar quase a largura completa, mas mantendo proporção
       const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
       let newWidth, newHeight;
       
-      if (screenWidth < 480) { // Telefones pequenos
-        newWidth = Math.min(300, containerWidth - 10);
-      } else if (screenWidth < 768) { // Telefones maiores
-        newWidth = Math.min(400, containerWidth - 15);
-      } else { // Tablets e desktop
-        newWidth = Math.min(500, containerWidth - 20);
+      if (isHorizontalMode) {
+        // Modo horizontal: usar quase toda a largura disponível
+        newWidth = Math.min(containerWidth - 10, screenWidth - 20);
+        newHeight = Math.floor(Math.min(newWidth * 0.6, screenHeight * 0.4)); // Proporção mais larga
+      } else {
+        // Modo vertical normal
+        if (screenWidth < 480) { // Telefones pequenos
+          newWidth = Math.min(300, containerWidth - 10);
+        } else if (screenWidth < 768) { // Telefones maiores
+          newWidth = Math.min(400, containerWidth - 15);
+        } else { // Tablets e desktop
+          newWidth = Math.min(500, containerWidth - 20);
+        }
+        newHeight = Math.floor(newWidth * 0.7); // Manter proporção de aspecto normal
       }
       
-      newHeight = Math.floor(newWidth * 0.7); // Manter proporção de aspecto
       setCanvasSize({ width: newWidth, height: newHeight });
     }
   };
@@ -100,6 +108,11 @@ function Sala() {
     window.addEventListener('resize', updateCanvasSize);
     return () => window.removeEventListener('resize', updateCanvasSize);
   }, []);
+
+  // Atualizar canvas quando o modo horizontal mudar
+  useEffect(() => {
+    updateCanvasSize();
+  }, [isHorizontalMode]);
 
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -816,17 +829,34 @@ function Sala() {
             {isGameStarted ? (
               isDrawer ? (
                 <>
-                  <div className="flex flex-col sm:flex-row justify-between items-center mb-2 gap-1">
-                    <p className="text-sm text-green-300 font-bold">Você está desenhando!</p>
+                  <div className={`flex ${isHorizontalMode ? 'flex-col' : 'flex-col sm:flex-row'} justify-between items-center mb-2 gap-1`}>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-green-300 font-bold">Você está desenhando!</p>
+                      {/* Botão toggle horizontal */}
+                      <button
+                        onClick={() => setIsHorizontalMode(!isHorizontalMode)}
+                        className={`px-2 py-1 rounded text-xs font-bold transition ${
+                          isHorizontalMode 
+                            ? 'bg-yellow-300 text-blue-900' 
+                            : 'bg-white/20 text-white hover:bg-white/30'
+                        }`}
+                        title={isHorizontalMode ? 'Modo Normal' : 'Modo Horizontal'}
+                      >
+                        {isHorizontalMode ? '📱' : '📺'}
+                      </button>
+                    </div>
                     <p className="text-sm">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-1 py-0.5 rounded text-xs">{word}</span></p>
                   </div>
                   
-                  <div ref={canvasContainerRef} className="w-full mb-2">
+                  <div 
+                    ref={canvasContainerRef} 
+                    className={`w-full mb-2 ${isHorizontalMode ? 'flex justify-center' : ''}`}
+                  >
                     <canvas
                       ref={canvasRef}
                       width={canvasSize.width}
                       height={canvasSize.height}
-                      className="border-2 border-yellow-300 bg-white rounded cursor-crosshair mx-auto"
+                      className="border-2 border-yellow-300 bg-white rounded cursor-crosshair"
                       style={{ 
                         touchAction: "none",
                         maxWidth: "100%",
@@ -841,12 +871,20 @@ function Sala() {
                       onTouchEnd={handleTouchEnd}
                     />
                   </div>
-                  <button
-                    onClick={handleClearCanvas}
-                    className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition"
-                  >
-                    🗑️ Apagar
-                  </button>
+                  
+                  <div className="flex justify-center gap-2">
+                    <button
+                      onClick={handleClearCanvas}
+                      className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition"
+                    >
+                      🗑️ Apagar
+                    </button>
+                    {isHorizontalMode && (
+                      <div className="text-xs text-yellow-200 flex items-center">
+                        💡 Modo horizontal ativo - mais espaço para desenhar!
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <>
