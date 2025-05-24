@@ -37,6 +37,7 @@ app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
+
 app.get('/', (req, res) => {
   res.send('Servidor ArteRápida a funcionar!');
 });
@@ -468,16 +469,7 @@ io.on('connection', (socket) => {
       }
       
       // Calcular pontos com base no tempo restante
-      let timeLeft = 0;
-      if (room.timerInterval && room.timePerRound) {
-        // Encontrar o tempo restante do último timer-update enviado
-        // Como não guardamos o timeLeft, vamos estimar pelo tempoPerRound e pelo round
-        // Melhor: guardar timeLeft no room a cada timer-update
-        // (Implementação rápida: guardar timeLeft no room)
-      }
-      // Se não existir, usar 0
-      timeLeft = room._lastTimeLeft || 0;
-      // Pontuação: 10 + (tempoRestante / 5) para quem acerta
+      let timeLeft = room._lastTimeLeft || 0;
       const playerPoints = 10 + Math.floor(timeLeft / 5);
       const drawerPoints = 5;
       // Jogador que acertou ganha pontos proporcionais ao tempo
@@ -497,7 +489,7 @@ io.on('connection', (socket) => {
       // Avançar para próxima ronda ou terminar
       if (room.timerInterval) clearInterval(room.timerInterval);
       io.to(roomCode).emit('round-ended', { reason: 'guessed' });
-      setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
+      setTimeout(() => nextRoundOrEnd(room, io), 3000);
     }
   });
 
