@@ -10,10 +10,10 @@ const { WORDS_FACIL, WORDS_MEDIO, WORDS_DIFICIL, getRandomWord } = require('./wo
 const app = express();
 const server = http.createServer(app);
 
-// Configuração de CORS mais permissiva para debug
+// Configuração de CORS mais robusta
 const corsOptions = {
   origin: function (origin, callback) {
-    // Em desenvolvimento, permite qualquer origem
+    // Em desenvolvimento, permite qualquer origem para localhost
     if (!origin) return callback(null, true);
     
     // Lista de origens permitidas
@@ -26,13 +26,23 @@ const corsOptions = {
       'http://localhost:3000'
     ];
     
+    // Verificar se a origem está permitida
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     
-    // Log da origem para debug
-    console.log('CORS - Origem não permitida:', origin);
-    return callback(null, true); // Permite temporariamente para debug
+    // Em desenvolvimento, permite localhost com qualquer porta
+    if (process.env.NODE_ENV !== 'production' && origin && origin.includes('localhost')) {
+      console.log('CORS - Origem localhost permitida em desenvolvimento:', origin);
+      return callback(null, true);
+    }
+    
+    // Log da origem para debug apenas em desenvolvimento
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('CORS - Origem não permitida:', origin);
+    }
+    
+    return callback(new Error('Não permitido pelo CORS'), false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -40,7 +50,19 @@ const corsOptions = {
 };
 
 const io = socketIo(server, {
-  cors: corsOptions
+  cors: corsOptions,
+  // Configurações para melhorar a conexão
+  pingTimeout: 60000, // 60 segundos
+  pingInterval: 25000, // 25 segundos
+  transports: ['websocket', 'polling'], // Permite fallback para polling se websocket falhar
+  allowEIO3: true, // Compatibilidade com versões anteriores
+  // Configurações de reconexão
+  connectionStateRecovery: {
+    // Duração máxima para tentar recuperar a conexão
+    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutos
+    // Permitir recuperação se o cliente se desconectar e reconectar rapidamente
+    skipMiddlewares: true,
+  }
 });
 
 // Middleware
@@ -293,6 +315,102 @@ function nextRoundOrEnd(room, io) {
   }
 }
 
+// Função para limpar todos os timers de uma sala
+function clearRoomTimers(room) {
+  if (room.timerInterval) {
+    clearInterval(room.timerInterval);
+    room.timerInterval = null;
+  }
+  if (room.deleteTimeout) {
+    clearTimeout(room.deleteTimeout);
+    room.deleteTimeout = null;
+  }
+  if (room.reconnectTimeouts) {
+    room.reconnectTimeouts.forEach(timeout => clearTimeout(timeout));
+    room.reconnectTimeouts = [];
+  }
+}
+
+// Função para lidar com remoção de jogadores
+function handlePlayerRemoval(roomCode, socketId, userName, room, io) {
+  // Remover jogador da sala
+  room.players = room.players.filter(player => player.id !== socketId);
+  
+  console.log(`${userName || socketId} saiu da sala ${roomCode}`);
+  
+  // Se não sobrou ninguém, marcar para deletar após 10 minutos
+  if (room.players.length === 0) {
+    console.log(`Sala ${roomCode} ficou vazia. Será deletada em 10 minutos se ninguém entrar.`);
+    
+    // Limpar todos os timers da sala
+    clearRoomTimers(room);
+    
+    // Marcar sala como vazia e definir timeout para deleção
+    room.isEmpty = true;
+    room.emptyTime = Date.now();
+    room.deleteTimeout = setTimeout(() => {
+      if (rooms.has(roomCode) && room.players.length === 0) {
+        // Limpar todos os timers antes de deletar
+        clearRoomTimers(room);
+        rooms.delete(roomCode);
+        console.log(`Sala ${roomCode} deletada após 10 minutos vazia`);
+        io.emit('room-deleted', { roomCode });
+      }
+    }, 10 * 60 * 1000); // 10 minutos
+    
+    return;
+  }
+  
+  // Se alguém voltou para a sala, cancelar a deleção
+  if (room.deleteTimeout) {
+    clearTimeout(room.deleteTimeout);
+    room.deleteTimeout = null;
+    room.isEmpty = false;
+    console.log(`Sala ${roomCode} não está mais vazia. Deleção cancelada.`);
+  }
+  
+  // Se o host saiu, passar o controle para outro jogador
+  if (room.host === socketId) {
+    if (room.players.length > 0) {
+      room.host = room.players[0].id;
+      room.players[0].isHost = true;
+      console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
+    } else {
+      console.log(`Sala ${roomCode} ficou sem jogadores após saída do host`);
+    }
+  }
+  
+  // Se o desenhista atual saiu durante uma ronda ativa, terminar a ronda
+  if (room.currentDrawer === socketId && room.status === 'playing') {
+    console.log(`Desenhista ${userName} saiu durante a ronda. Terminando ronda automaticamente.`);
+    
+    // Limpar o timer da ronda atual
+    if (room.timerInterval) {
+      clearInterval(room.timerInterval);
+      room.timerInterval = null;
+    }
+    
+    // Notificar que a ronda terminou por saída do desenhista
+    io.to(roomCode).emit('round-ended', { 
+      reason: 'drawer-left',
+      message: `${userName} (desenhista) saiu da sala. Avançando para próxima ronda...`
+    });
+    
+    // Resetar currentDrawer e currentWord
+    room.currentDrawer = null;
+    room.currentWord = null;
+    
+    // Avançar para próxima ronda após 3 segundos
+    setTimeout(() => nextRoundOrEnd(room, io), 3000);
+  }
+  
+  // Notificar os jogadores restantes
+  io.to(roomCode).emit('player-left', {
+    playerId: socketId,
+    players: room.players
+  });
+}
+
 io.on('connection', (socket) => {
   console.log('Novo usuário conectado:', socket.id);
   
@@ -372,35 +490,67 @@ io.on('connection', (socket) => {
         console.log(`Sala ${roomCode} reativada por ${userName}. Deleção cancelada.`);
       }
 
-      // Determinar se será o host (se sala estava vazia)
-      const isHost = room.players.length === 0;
+      // Verificar se é uma reconexão (jogador já existe mas está desconectado temporariamente)
+      let existingPlayer = room.players.find(p => p.name === userName && p.isTemporarilyDisconnected);
+      
+      if (existingPlayer) {
+        // Reconexão - atualizar socket ID e limpar flag de desconexão
+        existingPlayer.id = socket.id;
+        existingPlayer.isTemporarilyDisconnected = false;
+        delete existingPlayer.disconnectTime;
+        
+        // Remover timeout de reconexão específico deste jogador se existir
+        if (room.reconnectTimeouts) {
+          room.reconnectTimeouts = room.reconnectTimeouts.filter(timeoutId => {
+            // Tentar cancelar o timeout (pode já ter expirado)
+            try {
+              clearTimeout(timeoutId);
+              return false; // Remove da lista
+            } catch (e) {
+              return false; // Remove da lista mesmo se já expirou
+            }
+          });
+        }
+        
+        console.log(`${userName} reconectou à sala ${roomCode}`);
+        
+        // Notificar que o jogador reconectou
+        io.to(roomCode).emit('player-reconnected', {
+          playerId: socket.id,
+          playerName: userName,
+          players: room.players
+        });
+      } else {
+        // Determinar se será o host (se sala estava vazia)
+        const isHost = room.players.length === 0;
 
-      // Adicionar jogador à sala
-      room.players.push({
-        id: socket.id,
-        name: userName,
-        score: 0,
-        isHost: isHost
-      });
+        // Adicionar jogador à sala
+        room.players.push({
+          id: socket.id,
+          name: userName,
+          score: 0,
+          isHost: isHost
+        });
 
-      // Se for o host, definir como tal
-      if (isHost) {
-        room.host = socket.id;
+        // Se for o host, definir como tal
+        if (isHost) {
+          room.host = socket.id;
+        }
+
+        console.log(`${userName} entrou na sala ${roomCode}${isHost ? ' como novo host' : ''}`);
+        
+        // Notificar todos na sala sobre o novo jogador
+        io.to(roomCode).emit('player-joined', {
+          playerId: socket.id,
+          playerName: userName,
+          players: room.players
+        });
       }
 
       // Associar o socket à sala
       socket.join(roomCode);
       socket.data.roomCode = roomCode;
       socket.data.userName = userName;
-
-      console.log(`${userName} entrou na sala ${roomCode}${isHost ? ' como novo host' : ''}`);
-      
-      // Notificar todos na sala sobre o novo jogador
-      io.to(roomCode).emit('player-joined', {
-        playerId: socket.id,
-        playerName: userName,
-        players: room.players
-      });
 
       callback({ success: true });
     } catch (error) {
@@ -409,90 +559,121 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Reconectar à sala (para casos especiais de reconexão automática)
+  socket.on('reconnect-to-room', ({ userName, roomCode }, callback) => {
+    try {
+      const room = rooms.get(roomCode);
+      
+      if (!room) {
+        return callback({ success: false, error: 'Sala não encontrada' });
+      }
+
+      // Procurar jogador desconectado temporariamente
+      const existingPlayer = room.players.find(p => p.name === userName && p.isTemporarilyDisconnected);
+      
+      if (existingPlayer) {
+        // Reconexão bem-sucedida
+        existingPlayer.id = socket.id;
+        existingPlayer.isTemporarilyDisconnected = false;
+        delete existingPlayer.disconnectTime;
+        
+        // Remover timeout de reconexão específico deste jogador se existir
+        if (room.reconnectTimeouts) {
+          room.reconnectTimeouts = room.reconnectTimeouts.filter(timeoutId => {
+            // Tentar cancelar o timeout (pode já ter expirado)
+            try {
+              clearTimeout(timeoutId);
+              return false; // Remove da lista
+            } catch (e) {
+              return false; // Remove da lista mesmo se já expirou
+            }
+          });
+        }
+        
+        // Associar o socket à sala
+        socket.join(roomCode);
+        socket.data.roomCode = roomCode;
+        socket.data.userName = userName;
+        
+        console.log(`${userName} reconectou automaticamente à sala ${roomCode}`);
+        
+        // Notificar que o jogador reconectou
+        io.to(roomCode).emit('player-reconnected', {
+          playerId: socket.id,
+          playerName: userName,
+          players: room.players
+        });
+        
+        callback({ 
+          success: true, 
+          gameState: {
+            status: room.status,
+            round: room.round,
+            maxRounds: room.maxRounds,
+            currentDrawer: room.currentDrawer,
+            isDrawer: room.currentDrawer === socket.id,
+            timeLeft: room._lastTimeLeft || 0
+          }
+        });
+      } else {
+        callback({ success: false, error: 'Jogador não encontrado para reconexão' });
+      }
+    } catch (error) {
+      console.error('Erro ao reconectar à sala:', error);
+      callback({ success: false, error: 'Erro ao reconectar à sala' });
+    }
+  });
+
   // Quando um jogador se desconecta
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
     try {
       const roomCode = socket.data.roomCode;
       const userName = socket.data.userName;
 
+      console.log(`${userName || socket.id} desconectou da sala ${roomCode} - Motivo: ${reason}`);
+
       if (roomCode && rooms.has(roomCode)) {
         const room = rooms.get(roomCode);
         
-        // Remover jogador da sala
-        room.players = room.players.filter(player => player.id !== socket.id);
+        // Encontrar o jogador
+        const player = room.players.find(p => p.id === socket.id);
         
-        console.log(`${userName || socket.id} saiu da sala ${roomCode}`);
-        
-        // Se não sobrou ninguém, marcar para deletar após 10 minutos
-        if (room.players.length === 0) {
-          console.log(`Sala ${roomCode} ficou vazia. Será deletada em 10 minutos se ninguém entrar.`);
+        if (!player) {
+          console.log(`Jogador ${socket.id} não encontrado na sala ${roomCode}`);
+          return;
+        }
+
+        // Se a desconexão foi por fechar a janela/aba, dar um tempo para reconexão
+        if (reason === 'client namespace disconnect' || reason === 'transport close' || reason === 'transport error') {
+          console.log(`${userName} desconectou temporariamente. Aguardando reconexão...`);
           
-          // Cancelar timeout anterior se existir
-          if (room.deleteTimeout) {
-            clearTimeout(room.deleteTimeout);
-          }
+          // Marcar jogador como desconectado temporariamente
+          player.isTemporarilyDisconnected = true;
+          player.disconnectTime = Date.now();
           
-          // Marcar sala como vazia e definir timeout para deleção
-          room.isEmpty = true;
-          room.emptyTime = Date.now();
-          room.deleteTimeout = setTimeout(() => {
-            if (rooms.has(roomCode) && room.players.length === 0) {
-              rooms.delete(roomCode);
-              console.log(`Sala ${roomCode} deletada após 10 minutos vazia`);
-              io.emit('room-deleted', { roomCode });
+          // Notificar outros jogadores que alguém desconectou temporariamente
+          io.to(roomCode).emit('player-temporarily-disconnected', {
+            playerId: socket.id,
+            playerName: userName
+          });
+          
+          // Aguardar 30 segundos para reconexão antes de remover definitivamente
+          const timeoutId = setTimeout(() => {
+            if (rooms.has(roomCode) && player.isTemporarilyDisconnected) {
+              console.log(`${userName} não reconectou em 30 segundos. Removendo da sala.`);
+              handlePlayerRemoval(roomCode, socket.id, userName, room, io);
             }
-          }, 10 * 60 * 1000); // 10 minutos
+          }, 30000); // 30 segundos
+          
+          // Adicionar timeout à lista para limpeza posterior
+          if (!room.reconnectTimeouts) room.reconnectTimeouts = [];
+          room.reconnectTimeouts.push(timeoutId);
           
           return;
         }
         
-        // Se alguém voltou para a sala, cancelar a deleção
-        if (room.deleteTimeout) {
-          clearTimeout(room.deleteTimeout);
-          room.deleteTimeout = null;
-          room.isEmpty = false;
-          console.log(`Sala ${roomCode} não está mais vazia. Deleção cancelada.`);
-        }
-        
-        // Se o host saiu, passar o controle para outro jogador
-        if (room.host === socket.id) {
-          if (room.players.length > 0) {
-            room.host = room.players[0].id;
-            room.players[0].isHost = true;
-            console.log(`Novo host da sala ${roomCode}: ${room.players[0].name}`);
-          } else {
-            console.log(`Sala ${roomCode} ficou sem jogadores após saída do host`);
-          }
-        }
-        
-        // Se o desenhista atual saiu durante uma ronda ativa, terminar a ronda
-        if (room.currentDrawer === socket.id && room.status === 'playing') {
-          console.log(`Desenhista ${userName} saiu durante a ronda. Terminando ronda automaticamente.`);
-          
-          // Parar o timer da ronda atual
-          if (room.timerInterval) {
-            clearInterval(room.timerInterval);
-          }
-          
-          // Notificar que a ronda terminou por saída do desenhista
-          io.to(roomCode).emit('round-ended', { 
-            reason: 'drawer-left',
-            message: `${userName} (desenhista) saiu da sala. Avançando para próxima ronda...`
-          });
-          
-          // Resetar currentDrawer e currentWord
-          room.currentDrawer = null;
-          room.currentWord = null;
-          
-          // Avançar para próxima ronda após 3 segundos
-          setTimeout(() => nextRoundOrEnd(room, io), 3000);
-        }
-        
-        // Notificar os jogadores restantes
-        io.to(roomCode).emit('player-left', {
-          playerId: socket.id,
-          players: room.players
-        });
+        // Para outros tipos de desconexão, remover imediatamente
+        handlePlayerRemoval(roomCode, socket.id, userName, room, io);
       }
       
       console.log('Usuário desconectado:', socket.id);

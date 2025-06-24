@@ -9,6 +9,17 @@ interface Player {
   isHost: boolean;
 }
 
+interface DrawingLine {
+  points: { x: number; y: number }[];
+}
+
+interface WordHistoryEntry {
+  round: number;
+  word: string;
+  drawer: string;
+  guessedBy: string[];
+}
+
 function Sala() {
   const { roomCode } = useParams<{ roomCode: string }>();
   const navigate = useNavigate();
@@ -21,7 +32,7 @@ function Sala() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 500, height: 350 });
-  const [lines, setLines] = useState<any[]>([]);
+  const [lines, setLines] = useState<DrawingLine[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [guess, setGuess] = useState('');
   const [guesses, setGuesses] = useState<{ name: string; text: string; correct: boolean }[]>([]);
@@ -48,11 +59,31 @@ function Sala() {
   const [chatMessages, setChatMessages] = useState<{ name: string; message: string; timestamp: number }[]>([]);
   const [chatMessage, setChatMessage] = useState('');
   const [showChat, setShowChat] = useState(false);
-  const [wordHistory, setWordHistory] = useState<any[]>([]);
+  const [wordHistory, setWordHistory] = useState<WordHistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
   const [isHorizontalMode, setIsHorizontalMode] = useState(false);
+
+  // Refs para armazenar timeouts e intervalos para limpeza
+  const timeoutRefs = useRef<number[]>([]);
+
+  // Função auxiliar para adicionar timeout com limpeza automática
+  const addTimeout = (callback: () => void, delay: number) => {
+    const timeoutId = window.setTimeout(() => {
+      callback();
+      // Remover o timeout da lista após execução
+      timeoutRefs.current = timeoutRefs.current.filter(id => id !== timeoutId);
+    }, delay);
+    timeoutRefs.current.push(timeoutId);
+    return timeoutId;
+  };
+
+  // Função para limpar todos os timeouts
+  const clearAllTimeouts = () => {
+    timeoutRefs.current.forEach(id => window.clearTimeout(id));
+    timeoutRefs.current = [];
+  };
 
   // Adicionar viewport meta tag para mobile através do useEffect
   useEffect(() => {
@@ -187,12 +218,12 @@ function Sala() {
     socket.on('round-ended', ({ reason, message }) => {
       if (reason === 'timeout') {
         setRoundEnded(true);
-        setTimeout(() => setRoundEnded(false), 4000); // Esconde a mensagem após 4 segundos
+        addTimeout(() => setRoundEnded(false), 4000); // Esconde a mensagem após 4 segundos
       } else if (reason === 'drawer-left') {
         // Mostrar mensagem especial quando o desenhista sai
         setToastMessage(message || 'O desenhista saiu da sala. Avançando para próxima ronda...');
         setShowToast(true);
-        setTimeout(() => setShowToast(false), 4000);
+        addTimeout(() => setShowToast(false), 4000);
       }
     });
 
@@ -235,14 +266,14 @@ function Sala() {
       setHints(prev => [...prev, { hint, type }]);
       setToastMessage(hint);
       setShowToast(true);
-      setTimeout(() => setShowToast(false), 4000);
+      addTimeout(() => setShowToast(false), 4000);
     });
 
     socket.on('word-reveal', ({ word }) => {
       setRevealedWord(word);
       setToastMessage(`A palavra era: ${word}`);
       setShowToast(true);
-      setTimeout(() => {
+      addTimeout(() => {
         setShowToast(false);
         setRevealedWord(null);
       }, 5000);
@@ -276,9 +307,55 @@ function Sala() {
       setIsReconnecting(false);
     });
 
+    // Novos eventos para melhor handling de desconexões
+    socket.on('player-temporarily-disconnected', ({ playerId, playerName }) => {
+      setToastMessage(`${playerName} foi temporariamente desconectado`);
+      setShowToast(true);
+      addTimeout(() => setShowToast(false), 3000);
+    });
+
+    socket.on('player-reconnected', ({ playerId, playerName, players }) => {
+      setPlayers(players);
+      setToastMessage(`${playerName} reconectou!`);
+      setShowToast(true);
+      addTimeout(() => setShowToast(false), 3000);
+    });
+
+    // Event listener para reconexão automática de sala
+    const handleRoomReconnected = (event: CustomEvent) => {
+      const { gameState } = event.detail;
+      if (gameState) {
+        setRound(gameState.round);
+        setMaxRounds(gameState.maxRounds);
+        setDrawerId(gameState.currentDrawer);
+        setIsDrawer(gameState.isDrawer);
+        setTimer(gameState.timeLeft);
+        
+        setToastMessage('Reconectado à sala com sucesso!');
+        setShowToast(true);
+        addTimeout(() => setShowToast(false), 3000);
+      }
+    };
+
+    const handleConnectionError = () => {
+      setError('Falha na conexão. Tentando reconectar...');
+      addTimeout(() => {
+        if (connectionStatus === 'disconnected') {
+          navigate('/');
+        }
+      }, 10000); // Redirecionar para home após 10 segundos se não reconectar
+    };
+
+    // Adicionar event listeners customizados
+    window.addEventListener('roomReconnected', handleRoomReconnected as EventListener);
+    window.addEventListener('connectionError', handleConnectionError);
+
     setIsLoading(false);
 
     return () => {
+      // Limpar timeouts ativos
+      clearAllTimeouts();
+      
       // Limpar listeners ao sair
       socket.off('player-joined');
       socket.off('player-left');
@@ -299,11 +376,18 @@ function Sala() {
       socket.off('connect');
       socket.off('disconnect');
       socket.off('reconnect');
+      socket.off('player-temporarily-disconnected');
+      socket.off('player-reconnected');
+      
+      // Remover event listeners customizados
+      window.removeEventListener('roomReconnected', handleRoomReconnected as EventListener);
+      window.removeEventListener('connectionError', handleConnectionError);
     };
-  }, [roomCode, navigate]);
+  }, [roomCode, navigate, connectionStatus]);
 
   const handleLeaveRoom = () => {
-    // Desconectar do socket e voltar para home
+    // Limpar dados de sala e desconectar do socket
+    socketService.leaveRoom();
     socketService.disconnect();
     navigate('/');
   };
@@ -424,7 +508,7 @@ function Sala() {
     ctx.lineCap = 'round';
     lines.forEach(line => {
       ctx.beginPath();
-      line.points.forEach((pt: any, i: number) => {
+      line.points.forEach((pt: { x: number; y: number }, i: number) => {
         const adaptedPt = adaptPoint(pt);
         if (i === 0) ctx.moveTo(adaptedPt.x, adaptedPt.y);
         else ctx.lineTo(adaptedPt.x, adaptedPt.y);
@@ -466,12 +550,12 @@ function Sala() {
       }
       
       setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+      addTimeout(() => setShowToast(false), 3000);
     } catch (error) {
       console.error('Erro ao compartilhar no WhatsApp:', error);
       setToastMessage('Erro ao abrir WhatsApp');
       setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+      addTimeout(() => setShowToast(false), 3000);
     }
   };
 
@@ -500,7 +584,7 @@ function Sala() {
     }
     setToastMessage('Código da sala copiado!');
     setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+    addTimeout(() => setShowToast(false), 3000);
   };
 
   // Novas funções para as melhorias
@@ -512,7 +596,7 @@ function Sala() {
   };
 
   const handleGetWordHistory = () => {
-    socketService.getSocket().emit('get-word-history', { roomCode }, (response: { success: boolean; history?: any[]; error?: string }) => {
+    socketService.getSocket().emit('get-word-history', { roomCode }, (response: { success: boolean; history?: WordHistoryEntry[]; error?: string }) => {
       if (response.success && response.history) {
         setWordHistory(response.history);
         setShowHistory(true);
@@ -682,7 +766,7 @@ function Sala() {
                       }
                       setToastMessage('Link copiado!');
                       setShowToast(true);
-                      setTimeout(() => setShowToast(false), 3000);
+                      addTimeout(() => setShowToast(false), 3000);
                     }}
                     className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700"
                   >
@@ -710,7 +794,7 @@ function Sala() {
                       .then(() => {
                         setToastMessage('Compartilhado!');
                         setShowToast(true);
-                        setTimeout(() => setShowToast(false), 3000);
+                        addTimeout(() => setShowToast(false), 3000);
                       })
                       .catch(err => console.error('Erro ao compartilhar:', err));
                     }}
