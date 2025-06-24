@@ -18,6 +18,26 @@ const DEV_SERVER_URL = 'http://localhost:4000';
 // Usar URL de produção ou desenvolvimento baseado no ambiente
 const SERVER_URL = import.meta.env.PROD ? PROD_SERVER_URL : DEV_SERVER_URL;
 
+// Configurações avançadas do Socket.IO
+const socketOptions = {
+  autoConnect: true,
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+  transports: ['websocket', 'polling'],
+  upgrade: true,
+  rememberUpgrade: true,
+  path: '/socket.io/',
+  withCredentials: true,
+  forceNew: false,
+  // Headers específicos para CORS
+  extraHeaders: {
+    'Origin': import.meta.env.PROD ? 'https://desenharapido.netlify.app' : 'http://localhost:5173'
+  }
+};
+
 interface CreateRoomResponse {
   success: boolean;
   roomCode?: string;
@@ -53,19 +73,7 @@ class SocketService {
 
   connect() {
     if (!this.socket) {
-      this.socket = io(SERVER_URL, {
-        // Configurações de reconexão melhoradas
-        autoConnect: true,
-        reconnection: true,
-        reconnectionDelay: 1000, // 1 segundo
-        reconnectionDelayMax: 5000, // máximo 5 segundos
-        reconnectionAttempts: this.maxReconnectAttempts,
-        timeout: 20000, // 20 segundos timeout
-        transports: ['websocket', 'polling'], // Permitir fallback para polling
-        // Configurações adicionais para melhor estabilidade
-        forceNew: false,
-        upgrade: true
-      });
+      this.socket = io(SERVER_URL, socketOptions);
       
       this.socket.on('connect', () => {
         if (import.meta.env.DEV) {
@@ -74,8 +82,8 @@ class SocketService {
         this.isConnected = true;
         this.reconnectAttempts = 0;
         
-        // Se há informações de usuário e reconexão, tentar reconectar à sala
-        if (this.user && this.shouldAttemptReconnect()) {
+        // Se houver dados de reconexão, tentar reconectar à sala
+        if (this.reconnectData.roomCode) {
           this.attemptRoomReconnection();
         }
       });
@@ -86,13 +94,23 @@ class SocketService {
         }
         this.isConnected = false;
         
-        // Se foi desconexão não intencional, tentar reconectar
-        if (reason === 'io server disconnect' || reason === 'io client disconnect') {
-          // Não tentar reconectar se foi desconexão intencional
-          return;
+        // Se a desconexão foi por erro de transporte, tentar reconectar
+        if (reason === 'transport error' || reason === 'transport close') {
+          this.socket?.connect();
         }
-        
-        this.handleReconnection();
+      });
+
+      // Monitorar mudanças no estado do transporte
+      this.socket.on('upgrading', (transport) => {
+        if (import.meta.env.DEV) {
+          console.log('Atualizando transporte para:', transport.name);
+        }
+      });
+
+      this.socket.on('upgrade', (transport) => {
+        if (import.meta.env.DEV) {
+          console.log('Transporte atualizado para:', transport.name);
+        }
       });
 
       this.socket.on('connect_error', (error) => {
