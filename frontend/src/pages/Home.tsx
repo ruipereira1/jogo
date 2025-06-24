@@ -1,18 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 function Home() {
   const navigate = useNavigate();
+  const [isInstallable, setIsInstallable] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [orientation, setOrientation] = useState(window.innerHeight > window.innerWidth ? 'portrait' : 'landscape');
 
   // Adicionar viewport meta tag para mobile
-  React.useEffect(() => {
+  useEffect(() => {
     const viewport = document.querySelector('meta[name="viewport"]');
     if (viewport) {
-      viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+      viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
     } else {
       const meta = document.createElement('meta');
       meta.name = 'viewport';
-      meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+      meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
       document.getElementsByTagName('head')[0].appendChild(meta);
     }
 
@@ -24,30 +27,149 @@ function Home() {
     };
   }, []);
 
+  // Detectar PWA instalável
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // Detectar se já está instalado como PWA
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsInstallable(false);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  // Detectar mudanças de orientação
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      setOrientation(window.innerHeight > window.innerWidth ? 'portrait' : 'landscape');
+    };
+
+    window.addEventListener('resize', handleOrientationChange);
+    window.addEventListener('orientationchange', handleOrientationChange);
+
+    return () => {
+      window.removeEventListener('resize', handleOrientationChange);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstallable(false);
+      }
+      setDeferredPrompt(null);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 to-blue-400 text-white p-4">
-      <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-2 md:mb-4 text-center">ArteRápida</h1>
-      <p className="mb-4 sm:mb-6 md:mb-8 text-sm sm:text-base md:text-lg text-center">Desenhe, adivinhe e divirta-se!</p>
-      
-      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 md:gap-4 w-full max-w-xs sm:max-w-md">
-        <button
-          className="bg-yellow-300 text-blue-900 px-4 py-2 sm:px-6 sm:py-3 rounded-lg font-semibold shadow hover:bg-yellow-400 transition flex-1 text-xs sm:text-sm md:text-base"
-          onClick={() => navigate('/criar-sala')}
-        >
-          Criar Sala
-        </button>
-        <button
-          className="bg-white text-blue-900 px-4 py-2 sm:px-6 sm:py-3 rounded-lg font-semibold shadow hover:bg-gray-200 transition flex-1 text-xs sm:text-sm md:text-base"
-          onClick={() => navigate('/entrar-sala')}
-        >
-          Entrar em Sala
-        </button>
+    <div className="min-h-screen-safe flex flex-col items-center justify-center bg-gradient-to-br from-blue-900 via-blue-700 to-blue-400 text-white mobile:p-2 sm:p-4 touch-manipulation no-scroll-bounce">
+      {/* PWA Install Banner */}
+      {isInstallable && (
+        <div className="mobile-fixed-top bg-black/80 backdrop-blur-sm text-white p-3 text-center z-mobile-modal animate-slide-down">
+          <p className="text-sm mb-2">📱 Instalar ArteRápida como app?</p>
+          <div className="flex gap-2 justify-center">
+            <button
+              onClick={handleInstallApp}
+              className="bg-blue-500 text-white px-4 py-1 rounded-lg text-sm hover:bg-blue-600 transition touch-optimized tap-feedback"
+            >
+              Instalar
+            </button>
+            <button
+              onClick={() => setIsInstallable(false)}
+              className="bg-gray-500 text-white px-4 py-1 rounded-lg text-sm hover:bg-gray-600 transition touch-optimized tap-feedback"
+            >
+              Agora não
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <div className="flex flex-col items-center justify-center flex-1 px-4 w-full max-w-md">
+        {/* Logo/Title */}
+        <div className="text-center mb-8 animate-bounce-gentle">
+          <div className="text-6xl mb-4">🎨</div>
+          <h1 className="text-2xl xs:text-3xl sm:text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-yellow-300 via-yellow-200 to-yellow-300 bg-clip-text text-transparent">
+            ArteRápida
+          </h1>
+          <p className="mobile:text-sm-mobile sm:text-base md:text-lg text-blue-100 font-medium">
+            Desenhe, adivinhe e divirta-se!
+          </p>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex flex-col mobile:gap-3 sm:gap-4 w-full">
+          <button
+            className="ios-button mobile:min-h-touch bg-gradient-to-r from-yellow-400 to-yellow-300 text-blue-900 mobile:px-6 mobile:py-4 sm:px-8 sm:py-4 rounded-2xl font-bold shadow-xl hover:shadow-2xl transition-all duration-300 mobile:text-base-mobile sm:text-lg flex items-center justify-center gap-3 tap-feedback transform hover:scale-105"
+            onClick={() => navigate('/criar-sala')}
+          >
+            <span className="text-2xl">🎮</span>
+            Criar Sala
+          </button>
+          
+          <button
+            className="ios-button mobile:min-h-touch bg-white/20 backdrop-blur-sm text-white mobile:px-6 mobile:py-4 sm:px-8 sm:py-4 rounded-2xl font-bold shadow-xl hover:shadow-2xl transition-all duration-300 mobile:text-base-mobile sm:text-lg flex items-center justify-center gap-3 tap-feedback border border-white/30 hover:bg-white/30"
+            onClick={() => navigate('/entrar-sala')}
+          >
+            <span className="text-2xl">🚪</span>
+            Entrar em Sala
+          </button>
+        </div>
+
+        {/* Features Grid */}
+        <div className="grid grid-cols-2 gap-3 mt-8 w-full">
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/20">
+            <div className="text-2xl mb-1">👥</div>
+            <div className="mobile:text-xs-mobile sm:text-sm font-medium">Até 8 jogadores</div>
+          </div>
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/20">
+            <div className="text-2xl mb-1">📱</div>
+            <div className="mobile:text-xs-mobile sm:text-sm font-medium">Mobile-friendly</div>
+          </div>
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/20">
+            <div className="text-2xl mb-1">🎯</div>
+            <div className="mobile:text-xs-mobile sm:text-sm font-medium">3 dificuldades</div>
+          </div>
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/20">
+            <div className="text-2xl mb-1">💬</div>
+            <div className="mobile:text-xs-mobile sm:text-sm font-medium">Chat em tempo real</div>
+          </div>
+        </div>
       </div>
-      
-      <div className="mt-8 sm:mt-10 md:mt-12 text-[10px] sm:text-xs md:text-sm text-center text-blue-100">
-        <p>Versão 1.2 - Otimizada para todos os dispositivos</p>
-        <p className="mt-1">© 2025 ArteRápida - Desenvolvido por Dev Rui Valentim</p>
+
+      {/* Footer Info */}
+      <div className="mt-auto pb-safe-bottom pt-8 text-center">
+        <div className="mobile:text-xs sm:text-sm text-blue-100/80 space-y-1">
+          <p>Versão 2.0 - Otimizada para mobile 📱</p>
+          <p>© 2025 ArteRápida - Dev Rui Valentim</p>
+          {orientation === 'landscape' && window.innerHeight < 500 && (
+            <p className="text-yellow-300 animate-pulse-fast">
+              💡 Rotacione para melhor experiência
+            </p>
+          )}
+        </div>
       </div>
+
+      {/* Debug info pode ser habilitado manualmente se necessário */}
+      {false && (
+        <div className="fixed bottom-2 right-2 bg-black/50 text-white p-2 rounded text-xs">
+          <div>Orientação: {orientation}</div>
+          <div>Viewport: {window.innerWidth}x{window.innerHeight}</div>
+          <div>PWA: {window.matchMedia('(display-mode: standalone)').matches ? 'Sim' : 'Não'}</div>
+        </div>
+      )}
     </div>
   );
 }
