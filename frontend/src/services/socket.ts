@@ -11,7 +11,12 @@ declare global {
   }
 }
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:4000';
+// URLs de produção e desenvolvimento
+const PROD_SERVER_URL = 'https://jogo-0vuq.onrender.com';
+const DEV_SERVER_URL = 'http://localhost:4000';
+
+// Usar URL de produção ou desenvolvimento baseado no ambiente
+const SERVER_URL = import.meta.env.PROD ? PROD_SERVER_URL : DEV_SERVER_URL;
 
 interface CreateRoomResponse {
   success: boolean;

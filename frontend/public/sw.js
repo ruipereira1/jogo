@@ -1,13 +1,19 @@
 // ArteRápida Service Worker
-const CACHE_NAME = 'arterapida-v2.1.2';
-const RUNTIME_CACHE = 'runtime-cache-v2.1.2';
+const CACHE_NAME = 'arterapida-v2.1.3';
+const RUNTIME_CACHE = 'runtime-cache-v2.1.3';
+
+// URLs de produção
+const PROD_SERVER_URL = 'https://jogo-0vuq.onrender.com';
+const FRONTEND_URL = 'https://desenharapido.netlify.app';
 
 // Recursos críticos para cache
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json',
-  // Não incluir bundle.js específico pois o nome muda
+  '/sw.js',
+  '/icon.svg',
+  '/screenshots/home.webp'
 ];
 
 // Recursos estáticos que devem ser cacheados
@@ -21,13 +27,22 @@ function shouldCache(url) {
   try {
     const urlObj = new URL(url);
     
-    // Não cachear recursos externos
-    if (urlObj.origin !== location.origin) {
+    // Não cachear recursos do servidor backend
+    if (urlObj.origin === PROD_SERVER_URL) {
       return false;
     }
     
-    // Cachear recursos estáticos
-    return staticResourceTypes.some(regex => regex.test(urlObj.pathname));
+    // Não cachear WebSocket
+    if (urlObj.protocol === 'ws:' || urlObj.protocol === 'wss:') {
+      return false;
+    }
+    
+    // Cachear recursos estáticos do frontend
+    if (urlObj.origin === FRONTEND_URL || urlObj.origin === location.origin) {
+      return staticResourceTypes.some(regex => regex.test(urlObj.pathname));
+    }
+    
+    return false;
   } catch (error) {
     return false;
   }

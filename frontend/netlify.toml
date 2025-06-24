@@ -1,10 +1,40 @@
-# Configurações para aplicação Single Page Application
+# Configuração de build
 [build]
-  command = "npm run build"
   publish = "dist"
+  command = "npm run build"
 
-# Configuração para SPA - redireciona todas as rotas para o index.html
+# Configurações de ambiente
+[build.environment]
+  NODE_VERSION = "18"
+
+# Redirecionamentos e regras de rewrite
 [[redirects]]
   from = "/*"
   to = "/index.html"
-  status = 200 
+  status = 200
+
+# Headers para PWA e segurança
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = "default-src 'self' https://jogo-0vuq.onrender.com wss://jogo-0vuq.onrender.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data: blob:; connect-src 'self' https://jogo-0vuq.onrender.com wss://jogo-0vuq.onrender.com;"
+
+# Cache control para recursos estáticos
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate" 
