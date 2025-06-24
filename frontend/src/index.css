@@ -202,20 +202,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Orientation Lock Hint */
-.orientation-hint {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 999;
-  background: rgba(0, 0, 0, 0.9);
-  color: white;
-  padding: 20px;
-  border-radius: 12px;
-  text-align: center;
-  backdrop-filter: blur(10px);
-}
+/* Removido - classe não utilizada */
 
 /* Performance Optimizations */
 .will-change-transform {

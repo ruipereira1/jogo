@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useViewport } from '../hooks/useViewport';
 
 function Home() {
   const navigate = useNavigate();
@@ -7,25 +8,8 @@ function Home() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [orientation, setOrientation] = useState(window.innerHeight > window.innerWidth ? 'portrait' : 'landscape');
 
-  // Adicionar viewport meta tag para mobile
-  useEffect(() => {
-    const viewport = document.querySelector('meta[name="viewport"]');
-    if (viewport) {
-      viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
-    } else {
-      const meta = document.createElement('meta');
-      meta.name = 'viewport';
-      meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
-      document.getElementsByTagName('head')[0].appendChild(meta);
-    }
-
-    return () => {
-      // Restaurar viewport original quando componente for desmontado
-      if (viewport) {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0');
-      }
-    };
-  }, []);
+  // Configurar viewport para mobile
+  useViewport();
 
   // Detectar PWA instalável
   useEffect(() => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import socketService from '../services/socket';
+import { useViewport } from '../hooks/useViewport';
 
 function CriarSala() {
   const [nome, setNome] = useState('');
@@ -10,27 +11,14 @@ function CriarSala() {
   const [difficulty, setDifficulty] = useState('facil');
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Configurar viewport para dispositivos móveis
-    const viewport = document.querySelector('meta[name="viewport"]');
-    if (viewport) {
-      viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
-    } else {
-      const meta = document.createElement('meta');
-      meta.name = 'viewport';
-      meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
-      document.getElementsByTagName('head')[0].appendChild(meta);
-    }
+  // Configurar viewport para mobile
+  useViewport();
 
+  useEffect(() => {
     // Conectar ao servidor Socket.IO
     socketService.connect();
     
     return () => {
-      // Restaurar viewport original quando componente for desmontado
-      if (viewport) {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0');
-      }
-      
       // Desconectar apenas se o usuário sair sem criar a sala
       if (!socketService.getUser()) {
         socketService.disconnect();

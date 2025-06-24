@@ -91,11 +91,10 @@ module.exports = {
         'ios-button': 'rgba(255, 255, 255, 0.15)',
         'ios-button-active': 'rgba(255, 255, 255, 0.25)',
       },
-      zIndex: {
-        'mobile-chat': '50',
-        'mobile-modal': '100',
-        'orientation-hint': '999',
-      },
+             zIndex: {
+         'mobile-chat': '50',
+         'mobile-modal': '100',
+       },
     },
   },
   plugins: [
