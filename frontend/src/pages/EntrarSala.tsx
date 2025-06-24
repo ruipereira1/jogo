@@ -47,8 +47,10 @@ function EntrarSala() {
       // Redirecionar para a sala
       navigate(`/sala/${roomCode.toUpperCase()}`);
     } catch (err) {
+      if (import.meta.env.DEV) {
+        console.error('Erro ao entrar na sala:', err);
+      }
       setError(err instanceof Error ? err.message : 'Erro ao entrar na sala');
-      console.error('Erro ao entrar na sala:', err);
     } finally {
       setIsLoading(false);
     }
@@ -63,12 +65,19 @@ function EntrarSala() {
   const pasteFromClipboard = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      const code = text.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
-      if (code.length > 0) {
-        setRoomCode(code);
+      
+      // Tentar extrair código de 6 dígitos do texto colado
+      const match = text.match(/[A-Z0-9]{6}/);
+      if (match) {
+        setRoomCode(match[0]);
+      } else {
+        setRoomCode(text.slice(0, 6).toUpperCase());
       }
     } catch (err) {
-      console.log('Não foi possível colar do clipboard');
+      if (import.meta.env.DEV) {
+        console.log('Não foi possível colar do clipboard');
+      }
+      // Silenciosamente falhar se não conseguir acessar clipboard
     }
   };
 

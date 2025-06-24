@@ -31,13 +31,16 @@ function CriarSala() {
     setIsLoading(true);
     setError('');
     
-    try {
-      // Criar sala no servidor
-      const roomCode = await socketService.createRoom(nome, rounds, difficulty);
-      // Redirecionar para a sala
-      navigate(`/sala/${roomCode}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao criar sala');
+          try {
+        // Criar sala no servidor
+        const roomCode = await socketService.createRoom(nome, rounds, difficulty);
+        // Redirecionar para a sala
+        navigate(`/sala/${roomCode}`);
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.error('Erro ao criar sala:', err);
+        }
+        setError(err instanceof Error ? err.message : 'Erro ao criar sala');
       console.error('Erro ao criar sala:', err);
     } finally {
       setIsLoading(false);

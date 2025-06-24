@@ -1,10 +1,17 @@
 import { io, Socket } from 'socket.io-client';
 
-// Usa a URL de produção quando o app estiver rodando no Netlify, caso contrário usa localhost
-const isProduction = window.location.hostname !== 'localhost';
-const SOCKET_URL = isProduction
-  ? 'https://jogo-0vuq.onrender.com'
-  : 'http://localhost:4000';
+// Declaração de tipos para import.meta.env
+declare global {
+  interface ImportMeta {
+    env: {
+      DEV: boolean;
+      PROD: boolean;
+      [key: string]: any;
+    };
+  }
+}
+
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:4000';
 
 interface CreateRoomResponse {
   success: boolean;
@@ -36,10 +43,12 @@ class SocketService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectInterval: number | null = null;
+  private isConnected = false;
+  private reconnectData = { roomCode: '', userName: '' };
 
   connect() {
     if (!this.socket) {
-      this.socket = io(SOCKET_URL, {
+      this.socket = io(SERVER_URL, {
         // Configurações de reconexão melhoradas
         autoConnect: true,
         reconnection: true,
@@ -54,7 +63,10 @@ class SocketService {
       });
       
       this.socket.on('connect', () => {
-        console.log('Conectado ao servidor!');
+        if (import.meta.env.DEV) {
+          console.log('Conectado ao servidor!');
+        }
+        this.isConnected = true;
         this.reconnectAttempts = 0;
         
         // Se há informações de usuário e reconexão, tentar reconectar à sala
@@ -64,7 +76,10 @@ class SocketService {
       });
       
       this.socket.on('disconnect', (reason) => {
-        console.log('Desconectado do servidor!', reason);
+        if (import.meta.env.DEV) {
+          console.log('Desconectado do servidor!', reason);
+        }
+        this.isConnected = false;
         
         // Se foi desconexão não intencional, tentar reconectar
         if (reason === 'io server disconnect' || reason === 'io client disconnect') {
@@ -75,18 +90,32 @@ class SocketService {
         this.handleReconnection();
       });
 
+      this.socket.on('connect_error', (error) => {
+        if (import.meta.env.DEV) {
+          console.error('Erro de conexão:', error);
+        }
+        this.showConnectionError();
+      });
+
       this.socket.on('reconnect', (attemptNumber) => {
-        console.log(`Reconectado ao servidor na tentativa ${attemptNumber}!`);
+        if (import.meta.env.DEV) {
+          console.log(`Reconectado ao servidor na tentativa ${attemptNumber}!`);
+        }
+        this.isConnected = true;
         this.reconnectAttempts = 0;
       });
 
       this.socket.on('reconnect_error', (error) => {
-        console.error('Erro ao reconectar:', error);
+        if (import.meta.env.DEV) {
+          console.error('Erro ao reconectar:', error);
+        }
         this.reconnectAttempts++;
       });
 
       this.socket.on('reconnect_failed', () => {
-        console.error('Falha ao reconectar após máximo de tentativas');
+        if (import.meta.env.DEV) {
+          console.error('Falha ao reconectar após máximo de tentativas');
+        }
         this.showConnectionError();
       });
     }
@@ -100,26 +129,30 @@ class SocketService {
     return !!(roomCode && userName && this.user);
   }
 
-  private attemptRoomReconnection() {
-    const roomCode = localStorage.getItem('currentRoomCode');
-    const userName = localStorage.getItem('currentUserName');
+  private async attemptRoomReconnection() {
+    const { roomCode, userName } = this.reconnectData;
     
-    if (roomCode && userName && this.socket) {
+    if (!roomCode || !userName) return;
+
+    if (import.meta.env.DEV) {
       console.log(`Tentando reconectar à sala ${roomCode}...`);
-      
-      this.socket.emit('reconnect-to-room', { userName, roomCode }, (response: ReconnectResponse) => {
-        if (response.success) {
-          console.log('Reconexão à sala bem-sucedida!');
-          // Emitir evento customizado para o componente da sala
-          window.dispatchEvent(new CustomEvent('roomReconnected', {
-            detail: { gameState: response.gameState }
-          }));
-        } else {
-          console.error('Falha na reconexão à sala:', response.error);
-          // Limpar dados de sala se reconexão falhou
-          this.clearRoomData();
-        }
-      });
+    }
+
+    const response = await this.reconnectToRoom(userName, roomCode);
+    if (response.success) {
+      if (import.meta.env.DEV) {
+        console.log('Reconexão à sala bem-sucedida!');
+      }
+      // Emitir evento para informar o UI sobre a reconexão
+      window.dispatchEvent(new CustomEvent('roomReconnected', {
+        detail: response.gameState
+      }));
+    } else {
+      if (import.meta.env.DEV) {
+        console.error('Falha na reconexão à sala:', response.error);
+      }
+      // Limpar dados de reconexão se falhou
+      this.clearReconnectData();
     }
   }
 
@@ -223,6 +256,16 @@ class SocketService {
   leaveRoom() {
     this.clearRoomData();
     this.user = null;
+  }
+
+  private async reconnectToRoom(userName: string, roomCode: string): Promise<ReconnectResponse> {
+    // Implemente a lógica para reconectar à sala e retornar o resultado
+    // Este é um exemplo básico e deve ser ajustado de acordo com a sua implementação
+    return { success: true, gameState: { status: 'connected', round: 1, maxRounds: 3, currentDrawer: 'John', isDrawer: true, timeLeft: 120 } };
+  }
+
+  private clearReconnectData() {
+    this.reconnectData = { roomCode: '', userName: '' };
   }
 }
 

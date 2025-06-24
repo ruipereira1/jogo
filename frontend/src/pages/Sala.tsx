@@ -531,14 +531,14 @@ function Sala() {
   };
 
   // Função para compartilhar sala via WhatsApp
-  const handleShareWhatsApp = () => {
+  const handleShareWhatsApp = async () => {
     try {
       // Criar URL para a página de entrada direta com o código da sala
       const baseUrl = window.location.origin;
       const shareUrl = `${baseUrl}/entrar-sala/${roomCode}`;
       
       const shareText = `Venha jogar ArteRápida comigo! Basta entrar com seu nome:\n\n${shareUrl}`;
-      const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+      const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareText)}`;
       
       const newWindow = window.open(whatsappUrl, '_blank');
       
@@ -552,10 +552,11 @@ function Sala() {
       setShowToast(true);
       addTimeout(() => setShowToast(false), 3000);
     } catch (error) {
-      console.error('Erro ao compartilhar no WhatsApp:', error);
-      setToastMessage('Erro ao abrir WhatsApp');
-      setShowToast(true);
-      addTimeout(() => setShowToast(false), 3000);
+      if (import.meta.env.DEV) {
+        console.error('Erro ao compartilhar no WhatsApp:', error);
+      }
+      // Fallback: copiar para clipboard
+      handleCopyRoomCode();
     }
   };
 
@@ -796,7 +797,11 @@ function Sala() {
                         setShowToast(true);
                         addTimeout(() => setShowToast(false), 3000);
                       })
-                      .catch(err => console.error('Erro ao compartilhar:', err));
+                      .catch(err => {
+                        if (import.meta.env.DEV) {
+                          console.error('Erro ao compartilhar:', err);
+                        }
+                      });
                     }}
                     className="bg-blue-600 text-white px-3 py-2 rounded font-medium hover:bg-blue-700 transition flex items-center justify-center gap-1 text-xs"
                   >
@@ -876,7 +881,9 @@ function Sala() {
             
             <button 
               onClick={handleLeaveRoom}
-              className="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600 transition ml-auto"
+              className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition flex items-center gap-1"
+              title="Sair da sala"
+              aria-label="Sair da sala"
             >
               🚪
             </button>
@@ -953,6 +960,8 @@ function Sala() {
                       onTouchStart={handleTouchStart}
                       onTouchMove={handleTouchMove}
                       onTouchEnd={handleTouchEnd}
+                      aria-label={isDrawer ? `Canvas para desenhar a palavra: ${word}` : "Canvas mostrando o desenho atual"}
+                      role={isDrawer ? "application" : "img"}
                     />
                   </div>
                   
@@ -960,6 +969,7 @@ function Sala() {
                     <button
                       onClick={handleClearCanvas}
                       className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition"
+                      aria-label="Limpar desenho do canvas"
                     >
                       🗑️ Apagar
                     </button>
@@ -999,22 +1009,30 @@ function Sala() {
                       onChange={e => setGuess(e.target.value)}
                       disabled={guessedCorrectly}
                       autoComplete="off"
+                      aria-label="Campo para digitar palpite do desenho"
+                      role="textbox"
                     />
                     <button
                       type="submit"
                       className="bg-yellow-300 text-blue-900 px-2 py-1 rounded font-semibold text-xs hover:bg-yellow-400 transition"
                       disabled={guessedCorrectly}
+                      aria-label="Enviar palpite"
                     >
                       ➤
                     </button>
                   </form>
                   
                   {/* Feed de palpites - mais compacto */}
-                  <div className="max-h-20 overflow-y-auto bg-white/20 rounded p-1 text-left text-xs">
+                  <div 
+                    className="max-h-20 overflow-y-auto bg-white/20 rounded p-1 text-left text-xs"
+                    role="log"
+                    aria-live="polite"
+                    aria-label="Lista de palpites dos jogadores"
+                  >
                     {guesses.slice(-5).map((g, i) => (
                       <div key={i} className={g.correct ? "text-green-300 font-bold" : "text-white"}>
                         <span className="font-semibold">{g.name}:</span> {g.text}
-                        {g.correct && <span className="ml-1 text-[10px]">✓</span>}
+                        {g.correct && <span className="ml-1 text-[10px]" role="img" aria-label="correto">✓</span>}
                       </div>
                     ))}
                   </div>
