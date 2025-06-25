@@ -630,6 +630,24 @@ function Sala() {
       const baseUrl = window.location.origin;
       const shareUrl = `${baseUrl}/entrar-sala/${roomCode}`;
       
+      // Primeiro, copiar o link para a área de transferência
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(shareUrl);
+        } else {
+          const textArea = document.createElement('textarea');
+          textArea.value = shareUrl;
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+        }
+      } catch (clipboardError) {
+        if (import.meta.env.DEV) {
+          console.warn('Não foi possível copiar automaticamente:', clipboardError);
+        }
+      }
+      
       const shareText = `🎨 Venha jogar ArteRápida comigo! 
 
 Clique no link e será automático:
@@ -645,9 +663,9 @@ Sala: ${roomCode}`;
       
       // Verificar se a janela foi aberta com sucesso
       if (newWindow) {
-        setToastMessage('Link para WhatsApp aberto!');
+        setToastMessage('🔗 Link copiado e WhatsApp aberto!');
       } else {
-        setToastMessage('Não foi possível abrir o WhatsApp. Verifique se pop-ups estão habilitados.');
+        setToastMessage('🔗 Link copiado! Não foi possível abrir o WhatsApp automaticamente.');
       }
       
       setShowToast(true);
@@ -662,7 +680,32 @@ Sala: ${roomCode}`;
   };
 
   // Função para abrir modal de compartilhamento
-  const handleOpenShareModal = () => {
+  const handleOpenShareModal = async () => {
+    // Copiar automaticamente o link da sala para a área de transferência
+    const shareUrl = `${window.location.origin}/entrar-sala/${roomCode}`;
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        // Fallback para navegadores mais antigos
+        const textArea = document.createElement('textarea');
+        textArea.value = shareUrl;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setToastMessage('🔗 Link da sala copiado automaticamente!');
+      setShowToast(true);
+      addTimeout(() => setShowToast(false), 3000);
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('Erro ao copiar link:', error);
+      }
+      setToastMessage('❌ Não foi possível copiar automaticamente');
+      setShowToast(true);
+      addTimeout(() => setShowToast(false), 3000);
+    }
     setShowShareModal(true);
   };
   
@@ -838,6 +881,12 @@ Sala: ${roomCode}`;
             
             <h3 className="text-blue-900 text-base font-bold mb-2 text-center">🔗 Compartilhar Sala</h3>
             
+            <div className="bg-green-50 p-2 rounded-lg mb-3 border border-green-200">
+              <p className="text-green-700 text-xs text-center font-medium">
+                ✅ <strong>Link já copiado!</strong> Pode colar diretamente no WhatsApp ou onde quiser.
+              </p>
+            </div>
+            
             <div className="bg-blue-50 p-2 rounded-lg mb-3">
               <p className="text-blue-800 text-xs text-center">
                 💡 <strong>Dica:</strong> O link direto carrega automaticamente o código da sala!
@@ -899,15 +948,28 @@ Sala: ${roomCode}`;
                 </button>
                 {navigator.share && (
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       const shareUrl = `${window.location.origin}/entrar-sala/${roomCode}`;
+                      
+                      // Copiar primeiro para a área de transferência
+                      try {
+                        if (navigator.clipboard) {
+                          await navigator.clipboard.writeText(shareUrl);
+                        }
+                      } catch (clipboardError) {
+                        if (import.meta.env.DEV) {
+                          console.warn('Não foi possível copiar automaticamente:', clipboardError);
+                        }
+                      }
+                      
+                      // Depois abrir o partilhador nativo
                       navigator.share({
                         title: 'ArteRápida - Jogo de Desenho',
                         text: `🎨 Venha jogar ArteRápida comigo! Clique no link ou cole no campo "Código da sala". Sala: ${roomCode}`,
                         url: shareUrl
                       })
                       .then(() => {
-                        setToastMessage('Compartilhado!');
+                        setToastMessage('🔗 Link copiado e compartilhado!');
                         setShowToast(true);
                         addTimeout(() => setShowToast(false), 3000);
                       })
@@ -915,6 +977,9 @@ Sala: ${roomCode}`;
                         if (import.meta.env.DEV) {
                           console.error('Erro ao compartilhar:', err);
                         }
+                        setToastMessage('🔗 Link copiado!');
+                        setShowToast(true);
+                        addTimeout(() => setShowToast(false), 3000);
                       });
                     }}
                     className="bg-blue-600 text-white px-3 py-2 rounded font-medium hover:bg-blue-700 transition flex items-center justify-center gap-1 text-xs"
@@ -980,12 +1045,45 @@ Sala: ${roomCode}`;
               📚 Histórico
             </button>
             
-            <button
-              onClick={handleOpenShareModal}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-sm font-medium transition-all tap-feedback shadow-lg"
-            >
-              🔗 Partilhar
-            </button>
+            <div className="flex gap-1">
+              <button
+                onClick={async () => {
+                  const shareUrl = `${window.location.origin}/entrar-sala/${roomCode}`;
+                  try {
+                    if (navigator.clipboard) {
+                      await navigator.clipboard.writeText(shareUrl);
+                    } else {
+                      const textArea = document.createElement('textarea');
+                      textArea.value = shareUrl;
+                      document.body.appendChild(textArea);
+                      textArea.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(textArea);
+                    }
+                    setToastMessage('🔗 Link copiado!');
+                    setShowToast(true);
+                    addTimeout(() => setShowToast(false), 3000);
+                  } catch (error) {
+                    if (import.meta.env.DEV) {
+                      console.error('Erro ao copiar link:', error);
+                    }
+                    setToastMessage('❌ Erro ao copiar');
+                    setShowToast(true);
+                    addTimeout(() => setShowToast(false), 3000);
+                  }
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-sm font-medium transition-all tap-feedback shadow-lg"
+                title="Copiar link rapidamente"
+              >
+                📋
+              </button>
+              <button
+                onClick={handleOpenShareModal}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-sm font-medium transition-all tap-feedback shadow-lg"
+              >
+                🔗 Partilhar
+              </button>
+            </div>
             
             {isCurrentUserHost && !isGameStarted && (
               <button
