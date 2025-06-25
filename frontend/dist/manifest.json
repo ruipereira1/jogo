@@ -1,10 +1,10 @@
 {
   "name": "ArteRápida",
   "short_name": "ArteRápida",
-  "description": "Jogo de desenho online em tempo real",
+  "description": "Jogo de desenho e adivinhação online em português",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1a1a",
+  "background_color": "#ffffff",
   "theme_color": "#3b82f6",
   "orientation": "any",
   "scope": "/",
@@ -17,30 +17,83 @@
   "shortcuts": [
     {
       "name": "Criar Sala",
+      "short_name": "Nova Sala",
+      "description": "Criar uma nova sala de jogo",
       "url": "/criar-sala",
-      "description": "Criar uma nova sala de jogo"
+      "icons": [{ "src": "/icons/create-192x192.png", "sizes": "192x192" }]
     },
     {
       "name": "Entrar em Sala",
+      "short_name": "Entrar",
+      "description": "Entrar em uma sala existente",
       "url": "/entrar-sala",
-      "description": "Entrar em uma sala existente"
+      "icons": [{ "src": "/icons/join-192x192.png", "sizes": "192x192" }]
     }
   ],
   "screenshots": [
     {
-      "src": "/screenshots/home.webp",
-      "sizes": "1080x1920",
-      "type": "image/webp",
-      "platform": "narrow",
+      "src": "/screenshots/home.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "platform": "wide",
       "label": "Tela inicial do ArteRápida"
+    },
+    {
+      "src": "/screenshots/game.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "platform": "wide",
+      "label": "Jogando ArteRápida"
     }
   ],
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icons/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ],
   "display_override": ["window-controls-overlay", "standalone"],

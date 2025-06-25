@@ -1,13 +1,13 @@
 // ArteRápida Service Worker
-const CACHE_NAME = 'arterapida-v2.1.3';
+const CACHE_NAME = 'arte-rapida-v2.1.3';
 const RUNTIME_CACHE = 'runtime-cache-v2.1.3';
 
 // URLs de produção
 const PROD_SERVER_URL = 'https://jogo-0vuq.onrender.com';
 const FRONTEND_URL = 'https://desenharapido.netlify.app';
 
-// Recursos críticos para cache
-const urlsToCache = [
+// Lista de recursos para cache
+const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
@@ -61,86 +61,56 @@ async function cleanupOldCaches() {
 }
 
 // Instalação do Service Worker
-self.addEventListener('install', event => {
+self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
-      .then(() => self.skipWaiting())
-      .catch(error => {
-        if (self.registration?.showNotification) {
-          console.warn('Cache install failed:', error);
-        }
-      })
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS);
+    })
   );
+  self.skipWaiting();
 });
 
-// Ativação do Service Worker
-self.addEventListener('activate', event => {
+// Ativação e limpeza de caches antigos
+self.addEventListener('activate', (event) => {
   event.waitUntil(
-    Promise.all([
-      cleanupOldCaches(),
-      self.clients.claim()
-    ])
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => caches.delete(name))
+      );
+    })
   );
+  self.clients.claim();
 });
 
-// Interceptar requests
-self.addEventListener('fetch', event => {
-  // Apenas interceptar requisições GET
-  if (event.request.method !== 'GET') {
+// Estratégia de cache: Network First com fallback para cache
+self.addEventListener('fetch', (event) => {
+  // Ignorar requisições para o socket.io
+  if (event.request.url.includes('socket.io')) {
     return;
   }
-  
-  const url = event.request.url;
-  
-  // Não interceptar requisições de WebSocket ou Socket.IO
-  if (url.includes('socket.io') || url.includes('ws://') || url.includes('wss://')) {
-    return;
-  }
-  
+
   event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        // Retornar do cache se disponível
-        if (response) {
-          return response;
-        }
-        
-        // Tentar buscar da rede
-        return fetch(event.request)
-          .then(response => {
-            // Verificar se é uma resposta válida
-            if (!response || response.status !== 200 || response.type !== 'basic') {
-              return response;
-            }
-            
-            // Verificar se deve cachear
-            if (shouldCache(event.request.url)) {
-              const responseToCache = response.clone();
-              
-              caches.open(RUNTIME_CACHE)
-                .then(cache => {
-                  cache.put(event.request, responseToCache);
-                })
-                .catch(() => {
-                  // Falhar silenciosamente se não conseguir cachear
-                });
-            }
-            
-            return response;
-          })
-          .catch(() => {
-            // Se falhar e for navegação, retornar página offline
-            if (event.request.mode === 'navigate') {
-              return caches.match('/index.html');
-            }
-            
-            // Para outros recursos, retornar resposta vazia
-            return new Response('', {
-              status: 200,
-              statusText: 'OK'
-            });
+    fetch(event.request)
+      .then((response) => {
+        // Cache a resposta bem-sucedida
+        if (response.ok) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
           });
+        }
+        return response;
+      })
+      .catch(() => {
+        // Se falhar, tentar buscar do cache
+        return caches.match(event.request).then((response) => {
+          return response || new Response('Offline - Conteúdo não disponível', {
+            status: 503,
+            statusText: 'Service Unavailable'
+          });
+        });
       })
   );
 });
@@ -167,9 +137,9 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
-// Message handling para comunicação com o app
+// Lidar com mensagens do cliente
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
+  if (event.data === 'skipWaiting') {
     self.skipWaiting();
   }
 });

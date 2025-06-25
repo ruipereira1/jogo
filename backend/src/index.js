@@ -433,10 +433,42 @@ io.on('connection', (socket) => {
   // Criar sala
   socket.on('create-room', ({ userName, rounds, difficulty }, callback) => {
     try {
-      const roomCode = generateRoomCode();
-      
+      // Validações de entrada
+      if (!userName || typeof userName !== 'string') {
+        return callback({ success: false, error: 'Nome de utilizador inválido' });
+      }
+
+      const trimmedUserName = userName.trim();
+      if (trimmedUserName.length < 2 || trimmedUserName.length > 20) {
+        return callback({ success: false, error: 'Nome deve ter entre 2 e 20 caracteres' });
+      }
+
       // Validar número de rondas
-      const validRounds = rounds && rounds >= 1 && rounds <= 10 ? rounds : 3;
+      let validRounds = 3; // valor padrão
+      if (rounds !== undefined) {
+        if (typeof rounds !== 'number' || !Number.isInteger(rounds)) {
+          return callback({ success: false, error: 'Número de rondas deve ser um número inteiro' });
+        }
+        if (rounds < 1 || rounds > 10) {
+          return callback({ success: false, error: 'Número de rondas deve estar entre 1 e 10' });
+        }
+        validRounds = rounds;
+      }
+
+      // Validar dificuldade
+      const validDifficulties = ['facil', 'medio', 'dificil'];
+      const validDifficulty = difficulty && validDifficulties.includes(difficulty) ? difficulty : 'facil';
+
+      // Gerar código único para a sala
+      let roomCode;
+      let attempts = 0;
+      do {
+        roomCode = generateRoomCode();
+        attempts++;
+        if (attempts > 100) {
+          return callback({ success: false, error: 'Erro interno: não foi possível gerar código único' });
+        }
+      } while (rooms.has(roomCode));
       
       // Criar objeto da sala
       rooms.set(roomCode, {
@@ -444,7 +476,7 @@ io.on('connection', (socket) => {
         host: socket.id,
         players: [{
           id: socket.id,
-          name: userName,
+          name: trimmedUserName,
           score: 0,
           isHost: true
         }],
@@ -454,32 +486,61 @@ io.on('connection', (socket) => {
         round: 0,
         maxRounds: validRounds,
         timePerRound: 60,
-        difficulty: difficulty || 'facil'
+        difficulty: validDifficulty,
+        createdAt: new Date().toISOString(),
+        wordHistory: []
       });
+      
       // Associar o socket à sala
       socket.join(roomCode);
       socket.data.roomCode = roomCode;
-      socket.data.userName = userName;
-      console.log(`Sala ${roomCode} criada por ${userName} com ${validRounds} rondas`);
+      socket.data.userName = trimmedUserName;
+      
+      console.log(`Sala ${roomCode} criada por ${trimmedUserName} com ${validRounds} rondas (dificuldade: ${validDifficulty})`);
       callback({ success: true, roomCode });
     } catch (error) {
       console.error('Erro ao criar sala:', error);
-      callback({ success: false, error: 'Erro ao criar sala' });
+      callback({ success: false, error: 'Erro interno ao criar sala' });
     }
   });
 
   // Entrar em sala
   socket.on('join-room', ({ userName, roomCode }, callback) => {
     try {
-      const room = rooms.get(roomCode);
+      // Validações de entrada
+      if (!userName || typeof userName !== 'string') {
+        return callback({ success: false, error: 'Nome de utilizador inválido' });
+      }
+
+      if (!roomCode || typeof roomCode !== 'string') {
+        return callback({ success: false, error: 'Código da sala inválido' });
+      }
+
+      const trimmedUserName = userName.trim();
+      if (trimmedUserName.length < 2 || trimmedUserName.length > 20) {
+        return callback({ success: false, error: 'Nome deve ter entre 2 e 20 caracteres' });
+      }
+
+      const trimmedRoomCode = roomCode.trim().toUpperCase();
+      if (trimmedRoomCode.length !== 6) {
+        return callback({ success: false, error: 'Código da sala deve ter 6 caracteres' });
+      }
+
+      const room = rooms.get(trimmedRoomCode);
       
       if (!room) {
-        io.emit('room-not-found', { roomCode });
+        io.emit('room-not-found', { roomCode: trimmedRoomCode });
         return callback({ success: false, error: 'Sala não encontrada' });
       }
 
       if (room.status !== 'waiting') {
         return callback({ success: false, error: 'Jogo já iniciado' });
+      }
+
+      // Verificar se já existe um jogador com o mesmo nome (exceto se for reconexão)
+      const existingActivePlayer = room.players.find(p => p.name === trimmedUserName && !p.isTemporarilyDisconnected);
+      if (existingActivePlayer) {
+        return callback({ success: false, error: 'Já existe um jogador com esse nome na sala' });
       }
 
       // Se a sala estava vazia e marcada para deleção, cancelar
@@ -491,7 +552,7 @@ io.on('connection', (socket) => {
       }
 
       // Verificar se é uma reconexão (jogador já existe mas está desconectado temporariamente)
-      let existingPlayer = room.players.find(p => p.name === userName && p.isTemporarilyDisconnected);
+      let existingPlayer = room.players.find(p => p.name === trimmedUserName && p.isTemporarilyDisconnected);
       
       if (existingPlayer) {
         // Reconexão - atualizar socket ID e limpar flag de desconexão
@@ -512,12 +573,12 @@ io.on('connection', (socket) => {
           });
         }
         
-        console.log(`${userName} reconectou à sala ${roomCode}`);
+        console.log(`${trimmedUserName} reconectou à sala ${trimmedRoomCode}`);
         
         // Notificar que o jogador reconectou
-        io.to(roomCode).emit('player-reconnected', {
+        io.to(trimmedRoomCode).emit('player-reconnected', {
           playerId: socket.id,
-          playerName: userName,
+          playerName: trimmedUserName,
           players: room.players
         });
       } else {
@@ -527,7 +588,7 @@ io.on('connection', (socket) => {
         // Adicionar jogador à sala
         room.players.push({
           id: socket.id,
-          name: userName,
+          name: trimmedUserName,
           score: 0,
           isHost: isHost
         });
@@ -537,20 +598,20 @@ io.on('connection', (socket) => {
           room.host = socket.id;
         }
 
-        console.log(`${userName} entrou na sala ${roomCode}${isHost ? ' como novo host' : ''}`);
+        console.log(`${trimmedUserName} entrou na sala ${trimmedRoomCode}${isHost ? ' como novo host' : ''}`);
         
         // Notificar todos na sala sobre o novo jogador
-        io.to(roomCode).emit('player-joined', {
+        io.to(trimmedRoomCode).emit('player-joined', {
           playerId: socket.id,
-          playerName: userName,
+          playerName: trimmedUserName,
           players: room.players
         });
       }
 
       // Associar o socket à sala
-      socket.join(roomCode);
-      socket.data.roomCode = roomCode;
-      socket.data.userName = userName;
+      socket.join(trimmedRoomCode);
+      socket.data.roomCode = trimmedRoomCode;
+      socket.data.userName = trimmedUserName;
 
       callback({ success: true });
     } catch (error) {
@@ -702,18 +763,40 @@ io.on('connection', (socket) => {
 
   // Palpites dos jogadores
   socket.on('guess', ({ roomCode, text }) => {
-    if (!roomCode || !text) return;
-    const room = rooms.get(roomCode);
-    if (!room || room.status !== 'playing') return;
-    const userName = socket.data.userName;
-    const normalizedGuess = normalizeText(text);
-    const normalizedWord = normalizeText(room.currentWord || '');
-    const isCorrect = normalizedGuess === normalizedWord;
-    io.to(roomCode).emit('guess', {
-      name: userName,
-      text,
-      correct: isCorrect
-    });
+    try {
+      // Validações de entrada
+      if (!roomCode || typeof roomCode !== 'string') return;
+      if (!text || typeof text !== 'string') return;
+      
+      const trimmedText = text.trim();
+      if (trimmedText.length === 0 || trimmedText.length > 100) return;
+      
+      const room = rooms.get(roomCode);
+      if (!room || room.status !== 'playing') return;
+      
+      const userName = socket.data.userName;
+      if (!userName) return;
+      
+      // Verificar se é o desenhista (desenhista não pode dar palpites)
+      if (socket.id === room.currentDrawer) return;
+      
+      // Sanitizar texto para evitar HTML/scripts
+      const sanitizedText = trimmedText
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/\//g, '&#x2F;');
+      
+      const normalizedGuess = normalizeText(trimmedText);
+      const normalizedWord = normalizeText(room.currentWord || '');
+      const isCorrect = normalizedGuess === normalizedWord;
+      
+      io.to(roomCode).emit('guess', {
+        name: userName,
+        text: sanitizedText,
+        correct: isCorrect
+      });
     // Lógica de pontuação dinâmica
     if (isCorrect) {
       // Adicionar ao histórico quem acertou
@@ -760,26 +843,49 @@ io.on('connection', (socket) => {
       io.to(roomCode).emit('round-ended', { reason: 'guessed' });
       setTimeout(() => nextRoundOrEnd(room, io), 5000); // Espera 5s antes de nova ronda
     }
+    } catch (error) {
+      console.error('Erro ao processar palpite:', error);
+    }
   });
 
   // Sistema de chat durante o jogo
   socket.on('chat-message', ({ roomCode, message }) => {
-    if (!roomCode || !message || !message.trim()) return;
-    const room = rooms.get(roomCode);
-    if (!room) return;
-    const userName = socket.data.userName;
-    
-    // Verificar se a mensagem não é um palpite (para evitar spoilers)
-    const normalizedMessage = normalizeText(message);
-    const normalizedWord = normalizeText(room.currentWord || '');
-    const isWordGuess = room.status === 'playing' && normalizedMessage === normalizedWord;
-    
-    if (!isWordGuess) {
-      io.to(roomCode).emit('chat-message', {
-        name: userName,
-        message: message.trim(),
-        timestamp: Date.now()
-      });
+    try {
+      // Validações de entrada
+      if (!roomCode || typeof roomCode !== 'string') return;
+      if (!message || typeof message !== 'string') return;
+      
+      const trimmedMessage = message.trim();
+      if (trimmedMessage.length === 0 || trimmedMessage.length > 200) return;
+      
+      const room = rooms.get(roomCode);
+      if (!room) return;
+      
+      const userName = socket.data.userName;
+      if (!userName) return;
+      
+      // Sanitizar mensagem para evitar HTML/scripts
+      const sanitizedMessage = trimmedMessage
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/\//g, '&#x2F;');
+      
+      // Verificar se a mensagem não é um palpite (para evitar spoilers)
+      const normalizedMessage = normalizeText(trimmedMessage);
+      const normalizedWord = normalizeText(room.currentWord || '');
+      const isWordGuess = room.status === 'playing' && normalizedMessage === normalizedWord;
+      
+      if (!isWordGuess) {
+        io.to(roomCode).emit('chat-message', {
+          name: userName,
+          message: sanitizedMessage,
+          timestamp: Date.now()
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao processar mensagem de chat:', error);
     }
   });
 
