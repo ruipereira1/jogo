@@ -1,4 +1,4 @@
-# 🎨 ArteRápida - Jogo de Desenho Online
+# 🎨 ArteRápida - Jogo de Desenho Online 2.5
 
 **ArteRápida** é um jogo de desenho online multiplayer onde os jogadores se divertem desenhando e adivinhando palavras em tempo real!
 
@@ -12,91 +12,55 @@
 - **Sistema de pontuação inteligente** - Pontos baseados no tempo de resposta
 - **Partilha fácil de salas** - QR Code, WhatsApp e links diretos
 
-### 🚀 **Melhorias Recentes v2.0**
+### 🚀 **Novas Melhorias v2.5**
 
-#### 💡 **Sistema de Dicas Progressivas**
-- **40s restantes**: Mostra o número de letras
-- **25s restantes**: Revela a primeira letra
-- **10s restantes**: Mostra uma letra aleatória
-- Ajuda os jogadores quando o tempo está acabando
+#### 🏆 **Sistema de Conquistas e Níveis**
+- **Sistema de XP** com 7 níveis diferentes
+- **8 conquistas diferentes** (Bronze, Prata, Ouro, Platina)
+- **Gamificação completa** para manter jogadores engajados
+- **Progressão visual** com barras de progresso e recompensas
+- **Modal de conquistas** com animações
 
-#### 💬 **Chat Durante o Jogo**
-- Chat em tempo real entre jogadores
-- Não interfere com os palpites
-- Histórico de mensagens com timestamps
-- Contador de mensagens no botão
+#### 🎨 **Canvas Avançado**
+- **Ferramentas múltiplas** - Caneta, Pincel, Marcador, Borracha
+- **Suporte para pressão** - Stylus e 3D Touch
+- **Cores personalizáveis** e tamanhos de pincel
+- **Desenho suave** com curvas quadráticas
+- **Performance otimizada** com debounce e cache
 
-#### 📚 **Histórico de Palavras**
-- Veja todas as palavras das rondas anteriores
-- Quem desenhou cada palavra
-- Lista de quem acertou cada palavra
-- Perfeito para revisar a partida
+#### 📊 **Estatísticas Detalhadas**
+- **Tabs organizadas** - Ranking, Histórico, Estatísticas
+- **Métricas avançadas** - Tempo médio, streak, taxa de sucesso
+- **Histórico completo** de palavras por ronda
+- **Análise de performance** individual e geral
+- **Destaques da partida** com recordes
 
-#### 🔄 **Sistema de Reconexão Automática**
-- Reconexão automática em caso de queda de conexão
-- Indicador visual do status da conexão
-- Reentrada automática na sala após reconexão
+#### 🛡️ **Sistema de Moderação**
+- **Filtro de palavrões** automático
+- **Detecção de spam** com rate limiting
+- **Sistema anti-spoiler** impede revelar palavras
+- **Advertências progressivas** com banimento temporário
+- **Moderação de nomes** de usuários
 
-#### 🎯 **Melhorias de UX/UI**
-- **Animações suaves** e transições melhoradas
-- **Indicadores visuais** de status de conexão
-- **Botões com emojis** para melhor usabilidade
-- **Layout mais responsivo** para todos os dispositivos
-- **Toast notifications** para feedback instantâneo
+#### ⚡ **Performance e Otimização**
+- **Sistema de cache** em memória para salas
+- **Rate limiting avançado** para diferentes ações
+- **Lógica de jogo separada** em módulos
+- **Gestão de timers** melhorada
+- **Cleanup automático** de salas inativas
 
-#### 🛡️ **Melhorias de Robustez**
-- **Salas persistentes** - Não são deletadas imediatamente quando vazias
-- **Melhor tratamento** quando o desenhista sai
-- **Validação robusta** de rondas e parâmetros
-- **Sistema anti-spoiler** no chat (impede revelar a palavra)
+#### 🎯 **Sistema de Categorias** (Em Implementação)
+- **7 categorias temáticas**: Animais, Comida, Profissões, Objetos, Lugares, Transporte, Tecnologia
+- **600+ palavras** organizadas por categoria e dificuldade
+- **Seleção de categoria** na criação de salas
+- **Palavras personalizadas** por sala
 
 ### 🎨 **Funcionalidades de Desenho**
 - **Canvas adaptativo** que se ajusta ao tamanho da tela
 - **Suporte completo a touch** para dispositivos móveis
 - **Sincronização em tempo real** dos desenhos
-- **Função limpar canvas** para recomeçar
+- **Múltiplas ferramentas** de desenho
 - **Cursor personalizado** para melhor experiência
-
-## 🚀 Como Jogar
-
-### 1. **Criar uma Sala**
-- Escolha seu nome de usuário
-- Defina o número de rondas (1-10)
-- Selecione a dificuldade
-- Compartilhe o código da sala
-
-### 2. **Durante o Jogo**
-- **Se você é o desenhista**: Desenhe a palavra que apareceu para você
-- **Se você está adivinhando**: Digite seus palpites no chat
-- **Use o chat** para se comunicar com outros jogadores
-- **Acompanhe as dicas** que aparecem conforme o tempo passa
-
-### 3. **Sistema de Pontuação**
-- **Quem acerta**: 10 pontos + bônus por tempo restante
-- **Desenhista**: 5 pontos quando alguém acerta
-- **Classificação final** ao fim de todas as rondas
-
-## 📱 Compatibilidade
-
-- ✅ **Desktop** (Chrome, Firefox, Safari, Edge)
-- ✅ **Tablet** (iOS Safari, Chrome Android)
-- ✅ **Smartphone** (iOS, Android)
-- ✅ **PWA Ready** (pode ser instalado como app)
-
-## 🛠️ Tecnologias Utilizadas
-
-### Frontend
-- **React 18** com TypeScript
-- **React Router** para navegação
-- **Socket.IO Client** para comunicação em tempo real
-- **Tailwind CSS** para estilização responsiva
-- **Vite** como bundler e dev server
-
-### Backend
-- **Node.js** com Express
-- **Socket.IO** para comunicação WebSocket
-- **CORS** habilitado para múltiplos domínios
-- **Sistema de salas em memória** com limpeza automática
 
 ## 🔧 Instalação e Execução
 
@@ -104,45 +68,159 @@
 - Node.js 16+
 - npm ou yarn
 
-### 1. **Backend**
+### 1. **Instalação das Dependências**
 ```bash
+# Backend
 cd backend
 npm install
-npm start
-```
-O servidor será iniciado na porta 4000.
 
-### 2. **Frontend**
-```bash
+# Frontend
 cd frontend
 npm install
-npm run dev    # Para desenvolvimento
-npm run build  # Para produção
 ```
 
-### 3. **Variáveis de Ambiente**
-O backend aceita conexões de:
-- `https://desenharapido.netlify.app` (produção)
-- `http://localhost:3000`
-- `http://localhost:5173`
+### 2. **Execução em Desenvolvimento**
+```bash
+# Backend (Terminal 1)
+cd backend
+npm run dev
 
-## 🎯 Próximas Funcionalidades
+# Frontend (Terminal 2)
+cd frontend
+npm run dev
+```
+
+### 3. **Execução em Produção**
+```bash
+# Backend
+cd backend
+npm start
+
+# Frontend
+cd frontend
+npm run build
+npm run preview
+```
+
+## 🛠️ Tecnologias Utilizadas
+
+### Backend
+- **Node.js** com Express
+- **Socket.IO** para comunicação em tempo real
+- **Sistema de Cache** em memória
+- **Rate Limiting** com rate-limiter-flexible
+- **Moderação automática** com filtros
+- **Helmet** para segurança
+- **Compression** para otimização
+
+### Frontend
+- **React 18** com TypeScript
+- **React Router** para navegação
+- **Socket.IO Client** para comunicação
+- **Tailwind CSS** para estilização
+- **Canvas API** para desenho
+- **Vite** como bundler
+- **Sistema de conquistas** personalizado
+
+## 📚 Estrutura do Projeto
+
+```
+arteRapida/
+├── backend/
+│   ├── src/
+│   │   ├── index.js          # Servidor principal
+│   │   │   ├── words.js          # Sistema de palavras
+│   │   │   ├── gameLogic.js      # Lógica do jogo
+│   │   │   ├── cache.js          # Sistema de cache
+│   │   │   ├── moderation.js     # Sistema de moderação
+│   │   │   └── rateLimiter.js    # Rate limiting
+│   │   └── package.json
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Canvas.tsx          # Canvas avançado
+│   │   │   ├── GameStats.tsx       # Estatísticas
+│   │   │   └── AchievementSystem.tsx # Conquistas
+│   │   ├── pages/
+│   │   │   ├── Home.tsx
+│   │   │   ├── CriarSala.tsx
+│   │   │   ├── EntrarSala.tsx
+│   │   │   └── Sala.tsx
+│   │   └── services/
+│   │       └── socket.ts
+│   └── package.json
+└── README.md
+```
+
+## 🎯 Melhorias Implementadas
+
+### **Performance & Segurança**
+- ✅ **Cache em memória** para salas ativas
+- ✅ **Rate limiting** para diferentes ações
+- ✅ **Sistema de moderação** automática
+- ✅ **Limpeza automática** de recursos
+- ✅ **Validação robusta** de entrada
+
+### **UX/UI Avançada**
+- ✅ **Canvas profissional** com múltiplas ferramentas
+- ✅ **Estatísticas detalhadas** com tabs
+- ✅ **Sistema de conquistas** gamificado
+- ✅ **Responsividade total** mobile/desktop
+- ✅ **Animações suaves** e transições
+
+### **Funcionalidades do Jogo**
+- ✅ **600+ palavras** organizadas por categoria
+- ✅ **Sistema de níveis** com progressão
+- ✅ **Histórico completo** de partidas
+- ✅ **Métricas avançadas** de performance
+- ✅ **Anti-cheat** e moderação
+
+## 🚀 Próximas Funcionalidades
 
 ### 🔮 **Em Desenvolvimento**
-- **Categorias temáticas** (Animais, Comida, Desporto, etc.)
+- **Seleção de categorias** na criação de salas
 - **Modo espectador** para assistir partidas
-- **Sistema de níveis** e ranking global
-- **Palavras personalizadas** pelos jogadores
-- **Efeitos sonoros** e música de fundo
-- **Modo torneio** com eliminatórias
+- **Salas privadas** com senha
+- **Sistema de amigos** e convites
+- **Replay de partidas** com gravação
+- **Torneios** e competições
 
 ### 🌟 **Ideias Futuras**
+- **IA para avaliar desenhos** e dar dicas
+- **Modo colaborativo** (desenho em equipe)
 - **Integração com redes sociais**
-- **Replay de partidas**
-- **Modo colaborativo** (desenho em equipa)
-- **IA para avaliar desenhos**
-- **Salas privadas** com senha
-- **Sistema de conquistas**
+- **Sistema de clãs** e guildas
+- **Marketplace** de temas e pincéis
+- **Modo offline** com IA
+
+## 📊 Estatísticas do Projeto
+
+- **Versão atual**: 2.5
+- **Linhas de código**: ~5000+
+- **Componentes React**: 15+
+- **Palavras disponíveis**: 600+ em 7 categorias
+- **Níveis de conquista**: 7 níveis
+- **Tipos de conquista**: 4 (Bronze, Prata, Ouro, Platina)
+- **Ferramentas de desenho**: 4 tipos
+- **Rate limiters**: 7 diferentes
+- **Sistemas de cache**: 3 tipos
+
+## 🔒 Segurança
+
+- **CORS configurado** para domínios específicos
+- **Rate limiting** em todas as ações
+- **Validação de entrada** robusta
+- **Moderação automática** de conteúdo
+- **Sanitização** de dados do usuário
+- **Prevenção de XSS** e injeções
+
+## 📱 Compatibilidade
+
+- ✅ **Desktop** (Chrome, Firefox, Safari, Edge)
+- ✅ **Tablet** (iOS Safari, Chrome Android)
+- ✅ **Smartphone** (iOS, Android)
+- ✅ **PWA Ready** (pode ser instalado como app)
+- ✅ **Touch e stylus** totalmente suportados
 
 ## 🤝 Contribuição
 
@@ -166,17 +244,28 @@ Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para detalhes.
 
 ---
 
-## 📊 Estatísticas do Projeto
+## 🎨 Como Jogar
 
-- **Versão atual**: 2.0
-- **Linhas de código**: ~2000+
-- **Idioma**: Português de Portugal
-- **Palavras disponíveis**: 100+ em 3 níveis
-- **Tempo médio de partida**: 5-15 minutos
-- **Jogadores simultâneos**: Até 8 por sala
+### 1. **Criar uma Sala**
+- Escolha seu nome de usuário
+- Defina o número de rondas (1-10)
+- Selecione a dificuldade
+- Compartilhe o código da sala
+
+### 2. **Durante o Jogo**
+- **Se você é o desenhista**: Use as ferramentas para desenhar a palavra
+- **Se você está adivinhando**: Digite seus palpites no chat
+- **Ganhe XP**: Complete conquistas e suba de nível
+- **Acompanhe stats**: Veja seu progresso em tempo real
+
+### 3. **Sistema de Pontuação e XP**
+- **Quem acerta**: 10 pontos + bônus por tempo
+- **Desenhista**: 5 pontos quando alguém acerta
+- **XP por conquistas**: 50-1000 XP dependendo da dificuldade
+- **Níveis**: 7 níveis com recompensas exclusivas
 
 ---
 
-© 2025 ArteRápida - Desenvolvido por Dev Rui Valentim
+© 2025 ArteRápida v2.5 - Desenvolvido por Dev Rui Valentim
 
-**Diverte-te desenhando! 🎨✨** 
+**Desenha, Adivinha, Conquista! 🎨✨🏆** 

@@ -247,7 +247,12 @@ class SocketService {
   createRoom(userName: string, rounds: number = 3, difficulty: string = 'facil') {
     const socket = this.getSocket();
     return new Promise<string>((resolve, reject) => {
-      socket.emit('create-room', { userName, rounds, difficulty }, (response: CreateRoomResponse) => {
+      socket.emit('create-room', { 
+        userName, 
+        rounds, 
+        difficulty,
+        category: 'all' // Suporte para categorias temáticas
+      }, (response: CreateRoomResponse) => {
         if (response.success && response.roomCode) {
           this.setUser({ id: socket.id ?? '', name: userName });
           // Salvar código da sala para reconexão

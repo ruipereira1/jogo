@@ -3,12 +3,24 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const compression = require('compression');
+const helmet = require('helmet');
 
-// Importar banco de palavras
+// Importar sistemas melhorados
 const { WORDS_FACIL, WORDS_MEDIO, WORDS_DIFICIL, getRandomWord } = require('./words');
+const gameManager = require('./gameLogic');
+const moderationSystem = require('./moderation');
+const rateLimitManager = require('./rateLimiter');
 
 const app = express();
 const server = http.createServer(app);
+
+// Middleware de segurança e performance
+app.use(helmet({
+  contentSecurityPolicy: false, // Desabilitar CSP para desenvolvimento
+  crossOriginEmbedderPolicy: false
+}));
+app.use(compression());
 
 // Configuração de CORS mais robusta
 const corsOptions = {
@@ -67,7 +79,10 @@ const io = socketIo(server, {
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+
+// Rate limiting para rotas Express
+app.use('/api/', rateLimitManager.createExpressMiddleware('globalIP'));
 
 // Log middleware para debug
 app.use((req, res, next) => {
@@ -80,8 +95,23 @@ app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    message: 'Servidor ArteRápida funcionando!',
-    cors: 'enabled'
+    message: 'Servidor ArteRápida v2.5 funcionando!',
+    cors: 'enabled',
+    features: {
+      gameManager: true,
+      moderation: true,
+      rateLimiting: true,
+      cache: true
+    }
+  });
+});
+
+// Rota para estatísticas do servidor
+app.get('/api/stats', (req, res) => {
+  res.json({
+    rooms: gameManager.getRoomStats(),
+    moderation: moderationSystem.getModerationReport(),
+    rateLimiting: rateLimitManager.getActivityReport()
   });
 });
 
@@ -431,16 +461,29 @@ io.on('connection', (socket) => {
   }
 
   // Criar sala
-  socket.on('create-room', ({ userName, rounds, difficulty }, callback) => {
+  socket.on('create-room', async ({ userName, rounds, difficulty, category }, callback) => {
     try {
+      // Rate limiting
+      const rateLimitCheck = await rateLimitManager.checkSocketRateLimit(socket, 'createRoom');
+      if (!rateLimitCheck.allowed) {
+        return callback({ success: false, error: rateLimitCheck.message });
+      }
+
       // Validações de entrada
       if (!userName || typeof userName !== 'string') {
         return callback({ success: false, error: 'Nome de utilizador inválido' });
       }
 
       const trimmedUserName = userName.trim();
-      if (trimmedUserName.length < 2 || trimmedUserName.length > 20) {
-        return callback({ success: false, error: 'Nome deve ter entre 2 e 20 caracteres' });
+      
+      // Moderação do nome de usuário
+      const usernameModeration = moderationSystem.moderateUsername(trimmedUserName);
+      if (!usernameModeration.isAllowed) {
+        return callback({ 
+          success: false, 
+          error: usernameModeration.reason,
+          suggestedName: usernameModeration.suggestedName 
+        });
       }
 
       // Validar número de rondas
@@ -470,26 +513,25 @@ io.on('connection', (socket) => {
         }
       } while (rooms.has(roomCode));
       
-      // Criar objeto da sala
-      rooms.set(roomCode, {
-        id: roomCode,
-        host: socket.id,
-        players: [{
-          id: socket.id,
-          name: trimmedUserName,
-          score: 0,
-          isHost: true
-        }],
-        status: 'waiting', // waiting, playing, finished
-        currentDrawer: null,
-        currentWord: null,
-        round: 0,
-        maxRounds: validRounds,
-        timePerRound: 60,
+      // Usar GameManager para criar sala
+      const player = {
+        id: socket.id,
+        name: trimmedUserName,
+        score: 0,
+        isHost: true
+      };
+
+      const roomData = {
+        rounds: validRounds,
         difficulty: validDifficulty,
-        createdAt: new Date().toISOString(),
-        wordHistory: []
-      });
+        category: category || 'all'
+      };
+
+      const room = gameManager.createRoom(roomCode, socket.id, roomData);
+      gameManager.addPlayerToRoom(roomCode, player);
+      
+      // Manter compatibilidade com código existente
+      rooms.set(roomCode, room);
       
       // Associar o socket à sala
       socket.join(roomCode);
@@ -755,15 +797,37 @@ io.on('connection', (socket) => {
   });
 
   // Receber traço do desenhista e repassar para a sala
-  socket.on('draw-line', ({ roomCode, line }) => {
-    if (!roomCode || !line) return;
-    // Enviar para todos, exceto quem desenhou
-    socket.to(roomCode).emit('draw-line', line);
+  socket.on('draw-line', async ({ roomCode, line }) => {
+    try {
+      // Rate limiting para desenhos
+      const rateLimitCheck = await rateLimitManager.checkSocketRateLimit(socket, 'drawing');
+      if (!rateLimitCheck.allowed) return;
+
+      if (!roomCode || !line) return;
+      
+      const room = rooms.get(roomCode);
+      if (!room || room.status !== 'playing') return;
+      
+      // Verificar se é realmente o desenhista
+      if (socket.id !== room.currentDrawer) return;
+
+      // Enviar para todos, exceto quem desenhou
+      socket.to(roomCode).emit('draw-line', line);
+    } catch (error) {
+      console.error('Erro ao processar desenho:', error);
+    }
   });
 
   // Palpites dos jogadores
-  socket.on('guess', ({ roomCode, text }) => {
+  socket.on('guess', async ({ roomCode, text }) => {
     try {
+      // Rate limiting
+      const rateLimitCheck = await rateLimitManager.checkSocketRateLimit(socket, 'guess');
+      if (!rateLimitCheck.allowed) {
+        socket.emit('rate-limit-warning', { message: rateLimitCheck.message });
+        return;
+      }
+
       // Validações de entrada
       if (!roomCode || typeof roomCode !== 'string') return;
       if (!text || typeof text !== 'string') return;
@@ -849,8 +913,15 @@ io.on('connection', (socket) => {
   });
 
   // Sistema de chat durante o jogo
-  socket.on('chat-message', ({ roomCode, message }) => {
+  socket.on('chat-message', async ({ roomCode, message }) => {
     try {
+      // Rate limiting
+      const rateLimitCheck = await rateLimitManager.checkSocketRateLimit(socket, 'chatMessage');
+      if (!rateLimitCheck.allowed) {
+        socket.emit('rate-limit-warning', { message: rateLimitCheck.message });
+        return;
+      }
+
       // Validações de entrada
       if (!roomCode || typeof roomCode !== 'string') return;
       if (!message || typeof message !== 'string') return;
@@ -863,27 +934,50 @@ io.on('connection', (socket) => {
       
       const userName = socket.data.userName;
       if (!userName) return;
-      
-      // Sanitizar mensagem para evitar HTML/scripts
-      const sanitizedMessage = trimmedMessage
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;')
-        .replace(/\//g, '&#x2F;');
-      
-      // Verificar se a mensagem não é um palpite (para evitar spoilers)
-      const normalizedMessage = normalizeText(trimmedMessage);
-      const normalizedWord = normalizeText(room.currentWord || '');
-      const isWordGuess = room.status === 'playing' && normalizedMessage === normalizedWord;
-      
-      if (!isWordGuess) {
-        io.to(roomCode).emit('chat-message', {
-          name: userName,
-          message: sanitizedMessage,
-          timestamp: Date.now()
+
+      // Moderação da mensagem
+      const moderation = moderationSystem.moderateMessage(
+        socket.id, 
+        userName, 
+        trimmedMessage
+      );
+
+      if (!moderation.isAllowed) {
+        socket.emit('moderation-warning', { 
+          message: moderation.warning,
+          action: moderation.action 
         });
+        
+        if (moderation.action === 'temporary_ban') {
+          socket.emit('temporary-ban', { 
+            duration: 300000, // 5 minutos
+            reason: 'Múltiplas violações de conduta' 
+          });
+          socket.disconnect();
+        }
+        return;
       }
+
+      // Verificar spoiler apenas se o jogo estiver ativo
+      if (room.status === 'playing' && room.currentWord) {
+        const spoilerCheck = moderationSystem.checkWordSpoiler(trimmedMessage, room.currentWord);
+        if (spoilerCheck.isSpoiler) {
+          socket.emit('spoiler-warning', { 
+            message: 'Tentativa de revelar a palavra detectada!' 
+          });
+          return;
+        }
+      }
+
+      // Enviar mensagem moderada
+      const chatData = {
+        name: userName,
+        message: moderation.filteredMessage,
+        timestamp: Date.now(),
+        isSystem: false
+      };
+
+             io.to(roomCode).emit('chat-message', chatData);
     } catch (error) {
       console.error('Erro ao processar mensagem de chat:', error);
     }
@@ -928,7 +1022,51 @@ io.on('connection', (socket) => {
   });
 });
 
+// Sistema de limpeza automática de salas inativas
+setInterval(() => {
+  const now = Date.now();
+  const oneHourAgo = now - (60 * 60 * 1000); // 1 hora
+
+  rooms.forEach((room, roomCode) => {
+    const roomCreatedAt = new Date(room.createdAt).getTime();
+    
+    // Remover salas vazias por mais de 5 minutos
+    if (room.players.length === 0 && roomCreatedAt < (now - 5 * 60 * 1000)) {
+      console.log(`Limpeza automática: Removendo sala vazia ${roomCode}`);
+      gameManager.deleteRoom(roomCode);
+      rooms.delete(roomCode);
+    }
+    
+    // Remover salas inativas por mais de 1 hora
+    else if (roomCreatedAt < oneHourAgo) {
+      console.log(`Limpeza automática: Removendo sala inativa ${roomCode}`);
+      
+      // Notificar jogadores antes de remover
+      io.to(roomCode).emit('room-cleanup', { 
+        message: 'Sala removida por inatividade prolongada' 
+      });
+      
+      gameManager.deleteRoom(roomCode);
+      rooms.delete(roomCode);
+    }
+  });
+}, 5 * 60 * 1000); // Executar a cada 5 minutos
+
+// Log de estatísticas a cada hora
+setInterval(() => {
+  console.log('📊 Estatísticas do servidor:');
+  console.log(`- Salas ativas: ${rooms.size}`);
+  console.log(`- Total de conexões: ${io.engine.clientsCount}`);
+  console.log(`- Cache stats:`, gameManager.getCacheStats());
+  console.log(`- Moderação:`, moderationSystem.getModerationReport());
+}, 60 * 60 * 1000); // A cada hora
+
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-  console.log(`Servidor ouvindo na porta ${PORT}`);
+  console.log(`🚀 Servidor ArteRápida v2.5 iniciado na porta ${PORT}`);
+  console.log(`🎮 Funcionalidades ativas:`);
+  console.log(`  - Sistema de Cache: ✅`);
+  console.log(`  - Rate Limiting: ✅`);
+  console.log(`  - Moderação Automática: ✅`);
+  console.log(`  - Limpeza Automática: ✅`);
 }); 

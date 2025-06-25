@@ -232,4 +232,121 @@ input, button, select, textarea {
     background: #1a1a1a;
     color: #ffffff;
   }
+}
+
+/* Enhanced Mobile Game Interface */
+.mobile-game-container {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-canvas-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0;
+}
+
+.mobile-controls {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.mobile-player-card {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mobile-player-card:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateY(-2px);
+}
+
+.mobile-guess-input {
+  font-size: 16px !important;
+  padding: 16px;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.9);
+  transition: all 0.3s ease;
+}
+
+.mobile-guess-input:focus {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
+  outline: none;
+}
+
+/* Better touch targets */
+.touch-target {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Prevent text selection on game elements */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Smooth animations for mobile */
+@media (max-width: 768px) {
+  .mobile-animation {
+    animation-duration: 0.3s;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .mobile-slide-up {
+    transform: translateY(100%);
+    animation: slideUp 0.3s ease-out forwards;
+  }
+}
+
+@keyframes slideUp {
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Enhanced landscape mode */
+@media (orientation: landscape) and (max-height: 600px) {
+  .landscape-optimized {
+    height: 100vh;
+    display: flex;
+    flex-direction: row;
+  }
+  
+  .landscape-main {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+  }
+  
+  .landscape-side {
+    width: 320px;
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.1);
+  }
 } 

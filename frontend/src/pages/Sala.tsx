@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socketService from '../services/socket';
+import Canvas, { DrawingLine, DrawingData } from '../components/Canvas';
+import GameStats from '../components/GameStats';
+import AchievementSystem from '../components/AchievementSystem';
 
 interface Player {
   id: string;
@@ -9,9 +12,7 @@ interface Player {
   isHost: boolean;
 }
 
-interface DrawingLine {
-  points: { x: number; y: number }[];
-}
+// Interface DrawingLine importada do Canvas
 
 interface WordHistoryEntry {
   round: number;
@@ -64,6 +65,24 @@ function Sala() {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
   const [isHorizontalMode, setIsHorizontalMode] = useState(false);
+  const [isLandscapeMode, setIsLandscapeMode] = useState(false);
+  
+  // Estados para conquistas e estatísticas avançadas
+  const [playerStats, setPlayerStats] = useState({
+    totalGames: 0,
+    totalCorrectGuesses: 0,
+    totalDrawnWords: 0,
+    fastestGuessTime: 0,
+    longestStreak: 0,
+    totalScore: 0,
+    averageScore: 0,
+    wordsGuessedInOrder: 0,
+    perfectGames: 0,
+    artisticGames: 0
+  });
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [activeTab, setActiveTab] = useState<'game' | 'stats' | 'achievements'>('game');
 
   // Refs para armazenar timeouts e intervalos para limpeza
   const timeoutRefs = useRef<number[]>([]);
@@ -145,6 +164,23 @@ function Sala() {
     updateCanvasSize();
   }, [isHorizontalMode]);
 
+  // Detectar orientação da tela automaticamente
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      const isLandscape = window.innerHeight < window.innerWidth && window.innerHeight <= 600;
+      setIsLandscapeMode(isLandscape);
+    };
+
+    handleOrientationChange();
+    window.addEventListener('resize', handleOrientationChange);
+    window.addEventListener('orientationchange', handleOrientationChange);
+
+    return () => {
+      window.removeEventListener('resize', handleOrientationChange);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+    };
+  }, []);
+
   useEffect(() => {
     const socket = socketService.getSocket();
     const user = socketService.getUser();
@@ -189,7 +225,7 @@ function Sala() {
     });
 
     // Receber linhas desenhadas de outros jogadores
-    socket.on('draw-line', (line) => {
+    socket.on('draw-line', (line: DrawingLine) => {
       setLines(prev => [...prev, line]);
     });
 
@@ -197,9 +233,21 @@ function Sala() {
       setGuesses(prev => [...prev, { name, text, correct }]);
       if (correct) {
         setWinnerName(name);
-      }
-      if (correct && name === socketService.getUser()?.name) {
-        setGuessedCorrectly(true);
+        
+        // Atualizar estatísticas se o usuário acertou
+        if (name === socketService.getUser()?.name) {
+          setGuessedCorrectly(true);
+          setCurrentStreak(prev => prev + 1);
+          
+          setPlayerStats(prev => ({
+            ...prev,
+            totalCorrectGuesses: prev.totalCorrectGuesses + 1,
+            longestStreak: Math.max(prev.longestStreak, currentStreak + 1)
+          }));
+        }
+      } else if (name === socketService.getUser()?.name) {
+        // Reset streak se o usuário errou
+        setCurrentStreak(0);
       }
     });
 
@@ -236,6 +284,23 @@ function Sala() {
       // Ordenar por pontuação decrescente
       const sorted = [...players].sort((a, b) => b.score - a.score);
       setPodium(sorted);
+      
+      // Atualizar estatísticas do jogador
+      const currentUser = socketService.getUser();
+      const userPlayer = players.find((p: Player) => p.name === currentUser?.name);
+      
+      if (userPlayer) {
+        setPlayerStats(prev => ({
+          ...prev,
+          totalGames: prev.totalGames + 1,
+          totalScore: prev.totalScore + userPlayer.score,
+          averageScore: (prev.totalScore + userPlayer.score) / (prev.totalGames + 1),
+          perfectGames: prev.perfectGames + (currentStreak === round ? 1 : 0)
+        }));
+      }
+      
+      // Reset streak
+      setCurrentStreak(0);
     });
 
     socket.on('game-restarted', () => {
@@ -530,6 +595,24 @@ function Sala() {
     socketService.getSocket().emit('clear-canvas', { roomCode });
   };
 
+  // Função para lidar com dados de desenho do novo Canvas
+  const handleCanvasDraw = (data: DrawingData) => {
+    if (data.type === 'draw' && data.line && roomCode) {
+      const line = data.line;
+      setLines(prev => [...prev, line]);
+      socketService.getSocket().emit('draw-line', { roomCode, line });
+    } else if (data.type === 'clear') {
+      handleClearCanvas();
+    }
+  };
+
+  // Função para conquistas desbloqueadas
+  const handleAchievementUnlocked = (achievement: any) => {
+    setToastMessage(`🏆 Conquista desbloqueada: ${achievement.title}!`);
+    setShowToast(true);
+    addTimeout(() => setShowToast(false), 4000);
+  };
+
   // Função para compartilhar sala via WhatsApp
   const handleShareWhatsApp = async () => {
     try {
@@ -537,7 +620,15 @@ function Sala() {
       const baseUrl = window.location.origin;
       const shareUrl = `${baseUrl}/entrar-sala/${roomCode}`;
       
-      const shareText = `Venha jogar ArteRápida comigo! Basta entrar com seu nome:\n\n${shareUrl}`;
+      const shareText = `🎨 Venha jogar ArteRápida comigo! 
+
+Clique no link e será automático:
+${shareUrl}
+
+Ou cole este link no campo "Código da sala" no jogo:
+${shareUrl}
+
+Sala: ${roomCode}`;
       const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareText)}`;
       
       const newWindow = window.open(whatsappUrl, '_blank');
@@ -641,6 +732,13 @@ function Sala() {
         </div>
       )}
       
+      {/* Indicador de modo landscape */}
+      {isLandscapeMode && (
+        <div className="fixed bottom-4 right-4 bg-green-600/90 text-white px-3 py-2 rounded-lg shadow-lg z-40 text-xs backdrop-blur-sm border border-green-400/50">
+          📱 Modo Paisagem Ativo
+        </div>
+      )}
+      
       {/* Toast de notificação */}
       {showToast && (
         <div className="fixed top-2 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-3 py-1 rounded-lg shadow-lg z-50 text-xs animate-fade-in-out">
@@ -730,6 +828,12 @@ function Sala() {
             
             <h3 className="text-blue-900 text-base font-bold mb-2 text-center">🔗 Compartilhar Sala</h3>
             
+            <div className="bg-blue-50 p-2 rounded-lg mb-3">
+              <p className="text-blue-800 text-xs text-center">
+                💡 <strong>Dica:</strong> O link direto carrega automaticamente o código da sala!
+              </p>
+            </div>
+            
             <div className="text-center mb-3">
               <p className="text-gray-600 text-xs">Código da sala:</p>
               <div className="bg-blue-100 text-blue-900 font-mono text-lg font-bold p-2 rounded flex justify-center items-center gap-2 mb-2">
@@ -789,7 +893,7 @@ function Sala() {
                       const shareUrl = `${window.location.origin}/entrar-sala/${roomCode}`;
                       navigator.share({
                         title: 'ArteRápida - Jogo de Desenho',
-                        text: `Venha jogar ArteRápida comigo! Basta entrar com seu nome.`,
+                        text: `🎨 Venha jogar ArteRápida comigo! Clique no link ou cole no campo "Código da sala". Sala: ${roomCode}`,
                         url: shareUrl
                       })
                       .then(() => {
@@ -810,30 +914,33 @@ function Sala() {
                 )}
               </div>
               
-              <div className="mt-3">
-                <p className="text-gray-600 text-xs mb-1">QR Code:</p>
-                <div className="bg-white p-1 rounded-lg inline-block">
+              <div className="mt-4 text-center">
+                <p className="text-gray-600 text-xs mb-2">📱 QR Code para partilhar:</p>
+                <div className="bg-white p-3 rounded-xl shadow-lg inline-block">
                   <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(`${window.location.origin}/entrar-sala/${roomCode}`)}`} 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`${window.location.origin}/entrar-sala/${roomCode}`)}`} 
                     alt="QR Code da sala" 
-                    className="w-24 h-24 mx-auto"
+                    className="w-32 h-32 mx-auto"
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                       const parent = e.currentTarget.parentElement;
                       if (parent) {
-                        parent.innerHTML = '<p class="text-gray-500 text-xs p-2">QR indisponível</p>';
+                        parent.innerHTML = '<div class="w-32 h-32 bg-gray-100 rounded-lg flex items-center justify-center"><p class="text-gray-500 text-xs text-center">QR indisponível</p></div>';
                       }
                     }}
                   />
                 </div>
+                <p className="text-gray-500 text-xs mt-2">
+                  🎯 Escaneie para entrar diretamente na sala
+                </p>
               </div>
             </div>
           </div>
         </div>
       )}
       
-      <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col gap-1 mb-2">
+      <div className={`max-w-4xl mx-auto ${isLandscapeMode ? 'landscape-layout h-screen' : ''}`}>
+        <div className={`flex flex-col gap-1 mb-2 ${isLandscapeMode ? 'landscape-sidebar p-2' : ''}`}>
           {/* Linha 1: Título e contador de jogadores */}
           <div className="flex justify-between items-center">
             <h1 className="text-base sm:text-lg font-bold">Sala: {roomCode}</h1>
@@ -842,15 +949,15 @@ function Sala() {
             </span>
           </div>
           
-          {/* Linha 2: Botões de ação - mais compactos */}
-          <div className="flex gap-1 flex-wrap">
+          {/* Linha 2: Botões de ação - otimizados para móvel */}
+          <div className="flex gap-2 flex-wrap justify-center">
             <button
               onClick={() => setShowChat(true)}
-              className="bg-purple-600 text-white px-2 py-1 rounded text-xs hover:bg-purple-700 transition flex items-center gap-1"
+              className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-xl text-sm font-medium transition-all tap-feedback flex items-center gap-2 shadow-lg"
             >
-              💬
+              💬 Chat
               {chatMessages.length > 0 && (
-                <span className="bg-red-500 text-white text-[10px] rounded-full px-1">
+                <span className="bg-red-500 text-white text-xs rounded-full px-2 py-0.5 font-bold animate-pulse">
                   {chatMessages.length}
                 </span>
               )}
@@ -858,57 +965,75 @@ function Sala() {
             
             <button
               onClick={handleGetWordHistory}
-              className="bg-orange-600 text-white px-2 py-1 rounded text-xs hover:bg-orange-700 transition"
+              className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-xl text-sm font-medium transition-all tap-feedback shadow-lg"
             >
-              📚
+              📚 Histórico
             </button>
             
             <button
               onClick={handleOpenShareModal}
-              className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700 transition"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-sm font-medium transition-all tap-feedback shadow-lg"
             >
-              🔗
+              🔗 Partilhar
             </button>
             
             {isCurrentUserHost && !isGameStarted && (
               <button
                 onClick={handleStartGame}
-                className="bg-green-500 text-white px-2 py-1 rounded text-xs hover:bg-green-600 transition"
+                className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all tap-feedback shadow-lg animate-pulse"
               >
-                ▶️ Iniciar
+                ▶️ INICIAR JOGO
               </button>
             )}
             
             <button 
               onClick={handleLeaveRoom}
-              className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition flex items-center gap-1"
+              className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-xl text-sm font-medium transition-all tap-feedback flex items-center gap-2 shadow-lg"
               title="Sair da sala"
               aria-label="Sair da sala"
             >
-              🚪
+              🚪 Sair
             </button>
           </div>
         </div>
 
         {/* Layout responsivo para todos os dispositivos */}
-        <div className="flex flex-col gap-2">
-          {/* Lista de jogadores - mais compacta */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-2">
-            <div className="flex justify-between items-center mb-1">
-              <h2 className="font-semibold text-sm">Jogadores ({players.length})</h2>
-              <div className="text-xs text-yellow-200">Ronda: {round || 0}/{maxRounds || 1}</div>
+        <div className={`flex flex-col gap-2 ${isLandscapeMode ? 'landscape-canvas overflow-y-auto' : ''}`}>
+          {/* Lista de jogadores - otimizada para móvel */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 shadow-lg">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="font-bold text-base text-white">
+                👥 Jogadores ({players.length})
+              </h2>
+              <div className="bg-blue-800/50 px-3 py-1 rounded-full">
+                <span className="text-yellow-300 font-bold text-sm">
+                  Ronda: {round || 0}/{maxRounds || 1}
+                </span>
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1 text-xs">
+            <div className="mobile-players grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {players.map(player => (
                 <div 
                   key={player.id} 
-                  className={`flex items-center justify-between p-1 bg-white/10 rounded ${drawerId === player.id ? 'border border-yellow-300' : ''}`}
+                  className={`flex items-center justify-between p-3 rounded-xl transition-all ${
+                    drawerId === player.id 
+                      ? 'bg-gradient-to-r from-yellow-400/20 to-yellow-300/20 border-2 border-yellow-300 shadow-lg' 
+                      : 'bg-white/20 hover:bg-white/30'
+                  }`}
                 >
-                  <span className="truncate flex-1 mr-1">{player.name}</span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-yellow-300">{player.score}</span>
-                    {player.isHost && <span className="text-yellow-300 text-[10px]">👑</span>}
-                    {drawerId === player.id && <span className="text-green-300 text-[10px]">✏️</span>}
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="truncate text-white font-medium text-sm">
+                      {player.name}
+                    </span>
+                    {player.isHost && (
+                      <span className="text-yellow-300 text-base" title="Host">👑</span>
+                    )}
+                    {drawerId === player.id && (
+                      <span className="text-green-300 text-base animate-pulse" title="Desenhando">✏️</span>
+                    )}
+                  </div>
+                  <div className="bg-yellow-300 text-blue-900 px-2 py-1 rounded-lg font-bold text-sm">
+                    {player.score}
                   </div>
                 </div>
               ))}
@@ -920,121 +1045,146 @@ function Sala() {
             {isGameStarted ? (
               isDrawer ? (
                 <>
-                  <div className={`flex ${isHorizontalMode ? 'flex-col' : 'flex-col sm:flex-row'} justify-between items-center mb-2 gap-1`}>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm text-green-300 font-bold">Você está desenhando!</p>
-                      {/* Botão toggle horizontal */}
-                      <button
-                        onClick={() => setIsHorizontalMode(!isHorizontalMode)}
-                        className={`px-2 py-1 rounded text-xs font-bold transition ${
-                          isHorizontalMode 
-                            ? 'bg-yellow-300 text-blue-900' 
-                            : 'bg-white/20 text-white hover:bg-white/30'
-                        }`}
-                        title={isHorizontalMode ? 'Modo Normal' : 'Modo Horizontal'}
-                      >
-                        {isHorizontalMode ? '📱' : '📺'}
-                      </button>
+                  <div className="mb-4">
+                    {/* Status do desenhista */}
+                    <div className="text-center mb-3">
+                      <div className="inline-block bg-gradient-to-r from-green-500 to-green-400 text-white px-4 py-2 rounded-2xl shadow-lg">
+                        <p className="text-lg font-bold">✏️ Você está desenhando!</p>
+                      </div>
                     </div>
-                    <p className="text-sm">Palavra: <span className="font-mono bg-yellow-200 text-blue-900 px-1 py-0.5 rounded text-xs">{word}</span></p>
+                    
+                    {/* Palavra em destaque */}
+                    <div className="text-center mb-3">
+                      <p className="text-white text-sm mb-2">Desenhe esta palavra:</p>
+                      <div className="inline-block bg-yellow-300 text-blue-900 px-6 py-3 rounded-2xl shadow-xl border-2 border-yellow-400">
+                        <span className="font-mono text-2xl font-extrabold tracking-wider">
+                          {word}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                   
                   <div 
                     ref={canvasContainerRef} 
-                    className={`w-full mb-2 ${isHorizontalMode ? 'flex justify-center' : ''}`}
+                    className={`w-full mb-3 ${isHorizontalMode ? 'flex justify-center' : ''}`}
                   >
-                    <canvas
-                      ref={canvasRef}
-                      width={canvasSize.width}
-                      height={canvasSize.height}
-                      className="border-2 border-yellow-300 bg-white rounded cursor-crosshair"
-                      style={{ 
-                        touchAction: "none",
-                        maxWidth: "100%",
-                        height: "auto" 
-                      }}
-                      onMouseDown={handleMouseDown}
-                      onMouseMove={handleMouseMove}
-                      onMouseUp={handleMouseUp}
-                      onMouseLeave={handleMouseUp}
-                      onTouchStart={handleTouchStart}
-                      onTouchMove={handleTouchMove}
-                      onTouchEnd={handleTouchEnd}
-                      aria-label={isDrawer ? `Canvas para desenhar a palavra: ${word}` : "Canvas mostrando o desenho atual"}
-                      role={isDrawer ? "application" : "img"}
+                    <Canvas
+                      isDrawer={isDrawer}
+                      onDraw={handleCanvasDraw}
+                      lines={lines}
+                      onClear={handleClearCanvas}
+                      className="border-4 border-yellow-300 bg-white rounded-lg shadow-xl"
                     />
                   </div>
                   
-                  <div className="flex justify-center gap-2">
+                  <div className="flex justify-center gap-3 flex-wrap">
                     <button
                       onClick={handleClearCanvas}
-                      className="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600 transition"
+                      className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg transition-all tap-feedback"
                       aria-label="Limpar desenho do canvas"
                     >
-                      🗑️ Apagar
+                      🗑️ Apagar Tudo
+                    </button>
+                    <button
+                      onClick={() => setIsHorizontalMode(!isHorizontalMode)}
+                      className={`px-4 py-2 rounded-xl text-sm font-bold shadow-lg transition-all tap-feedback ${
+                        isHorizontalMode 
+                          ? 'bg-yellow-300 text-blue-900 hover:bg-yellow-400' 
+                          : 'bg-white/20 text-white hover:bg-white/30'
+                      }`}
+                      title={isHorizontalMode ? 'Modo Normal' : 'Modo Horizontal'}
+                    >
+                      {isHorizontalMode ? '📱 Normal' : '📺 Horizontal'}
                     </button>
                     {isHorizontalMode && (
-                      <div className="text-xs text-yellow-200 flex items-center">
-                        💡 Modo horizontal ativo - mais espaço para desenhar!
+                      <div className="text-sm text-yellow-200 flex items-center px-2 py-1 bg-blue-800/50 rounded-lg">
+                        💡 Mais espaço para desenhar!
                       </div>
                     )}
                   </div>
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-blue-200 font-bold mb-2">Adivinhe o desenho!</p>
+                  {/* Status do adivinhador */}
+                  <div className="text-center mb-4">
+                    <div className="inline-block bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-3 rounded-2xl shadow-lg">
+                      <p className="text-lg font-bold">🔍 Adivinhe o desenho!</p>
+                    </div>
+                    {drawerId && (
+                      <p className="text-blue-200 text-sm mt-2">
+                        🎨 {players.find(p => p.id === drawerId)?.name} está desenhando
+                      </p>
+                    )}
+                  </div>
                   
-                  <div ref={canvasContainerRef} className="w-full mb-2">
-                    <canvas
-                      ref={canvasRef}
-                      width={canvasSize.width}
-                      height={canvasSize.height}
-                      className="border-2 border-yellow-300 bg-white rounded mx-auto"
-                      style={{ 
-                        touchAction: "none", 
-                        cursor: 'not-allowed',
-                        maxWidth: "100%",
-                        height: "auto"
-                      }}
+                  <div ref={canvasContainerRef} className="w-full mb-3">
+                    <Canvas
+                      isDrawer={false}
+                      onDraw={handleCanvasDraw}
+                      lines={lines}
+                      onClear={handleClearCanvas}
+                      className="border-4 border-yellow-300 bg-white rounded-lg shadow-xl mx-auto"
                     />
                   </div>
                   
-                  {/* Campo de palpite */}
-                  <form onSubmit={handleGuessSubmit} className="flex gap-1 mb-2">
+                  {/* Campo de palpite otimizado para móvel */}
+                  <form onSubmit={handleGuessSubmit} className="flex gap-2 mb-3">
                     <input
                       type="text"
-                      className="p-1 rounded text-blue-900 flex-1 text-sm"
-                      placeholder={guessedCorrectly ? "Você acertou!" : "Digite seu palpite..."}
+                      className="flex-1 p-3 rounded-xl text-blue-900 text-base font-medium shadow-lg border-2 border-yellow-300 focus:border-yellow-400 focus:outline-none transition-all"
+                      placeholder={guessedCorrectly ? "🎉 Você acertou!" : "💭 Digite seu palpite..."}
                       value={guess}
                       onChange={e => setGuess(e.target.value)}
                       disabled={guessedCorrectly}
                       autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      style={{ fontSize: '16px' }} // Previne zoom no iOS
                       aria-label="Campo para digitar palpite do desenho"
                       role="textbox"
                     />
                     <button
                       type="submit"
-                      className="bg-yellow-300 text-blue-900 px-2 py-1 rounded font-semibold text-xs hover:bg-yellow-400 transition"
+                      className="bg-yellow-300 hover:bg-yellow-400 text-blue-900 px-4 py-3 rounded-xl font-bold text-base shadow-lg transition-all tap-feedback min-w-[60px]"
                       disabled={guessedCorrectly}
                       aria-label="Enviar palpite"
                     >
-                      ➤
+                      {guessedCorrectly ? '✅' : '➤'}
                     </button>
                   </form>
                   
-                  {/* Feed de palpites - mais compacto */}
+                  {/* Feed de palpites otimizado para móvel */}
                   <div 
-                    className="max-h-20 overflow-y-auto bg-white/20 rounded p-1 text-left text-xs"
+                    className="max-h-32 overflow-y-auto bg-white/20 backdrop-blur-sm rounded-xl p-3 text-left custom-scroll"
                     role="log"
                     aria-live="polite"
                     aria-label="Lista de palpites dos jogadores"
                   >
-                    {guesses.slice(-5).map((g, i) => (
-                      <div key={i} className={g.correct ? "text-green-300 font-bold" : "text-white"}>
-                        <span className="font-semibold">{g.name}:</span> {g.text}
-                        {g.correct && <span className="ml-1 text-[10px]" role="img" aria-label="correto">✓</span>}
+                    {guesses.length === 0 ? (
+                      <div className="text-white/70 text-sm text-center py-2">
+                        💬 Nenhum palpite ainda...
                       </div>
-                    ))}
+                    ) : (
+                      guesses.slice(-5).map((g, i) => (
+                        <div 
+                          key={i} 
+                          className={`mb-1 p-2 rounded-lg transition-all ${
+                            g.correct 
+                              ? "bg-green-500/30 text-green-200 font-bold border border-green-400/50" 
+                              : "bg-white/10 text-white hover:bg-white/20"
+                          }`}
+                        >
+                          <span className="font-semibold text-yellow-300">{g.name}:</span> 
+                          <span className="ml-1 text-sm">{g.text}</span>
+                          {g.correct && (
+                            <span className="ml-2 text-green-300 font-bold" role="img" aria-label="correto">
+                              ✅ ACERTOU!
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    )}
                   </div>
                 </>
               )
@@ -1055,16 +1205,34 @@ function Sala() {
           </div>
         </div>
 
-        {/* Cronómetro da ronda - mais compacto */}
+        {/* Cronómetro e informações - otimizado para móvel */}
         {isGameStarted && (
-          <div className="mt-2 text-center">
-            <div className="text-lg font-bold text-yellow-300">⏱️ {timer}s</div>
+          <div className="mt-3">
+            {/* Cronômetro em destaque */}
+            <div className="text-center mb-3">
+              <div className={`inline-block px-6 py-3 rounded-2xl shadow-xl transition-all ${
+                timer <= 10 && timer > 0
+                  ? 'bg-red-500 text-white animate-pulse border-2 border-red-300'
+                  : timer <= 30
+                  ? 'bg-orange-500 text-white border-2 border-orange-300'
+                  : 'bg-yellow-300 text-blue-900 border-2 border-yellow-400'
+              }`}>
+                <div className="text-2xl font-extrabold">
+                  ⏱️ {timer}s
+                </div>
+              </div>
+            </div>
             
-            {/* Área de dicas - mais compacta */}
+            {/* Área de dicas melhorada */}
             {hints.length > 0 && (
-              <div className="mt-1 bg-blue-800/50 rounded-lg p-1 max-w-sm mx-auto">
-                <div className="text-yellow-200 text-xs">
-                  {hints.slice(-1)[0]?.hint}
+              <div className="bg-gradient-to-r from-blue-800/70 to-purple-800/70 backdrop-blur-sm rounded-xl p-3 mx-auto max-w-md border border-blue-600/50 shadow-lg">
+                <div className="text-center">
+                  <div className="text-yellow-200 text-sm font-semibold mb-1">
+                    💡 Dica:
+                  </div>
+                  <div className="text-white text-base font-medium">
+                    {hints.slice(-1)[0]?.hint}
+                  </div>
                 </div>
               </div>
             )}
@@ -1205,6 +1373,25 @@ function Sala() {
               </button>
             </div>
           </div>
+        )}
+        
+        {/* Tab de Estatísticas */}
+        {activeTab === 'stats' && (
+          <GameStats 
+            players={players}
+            wordHistory={wordHistory}
+            currentRound={round}
+            maxRounds={maxRounds}
+            isGameFinished={!!podium}
+          />
+        )}
+        
+        {/* Tab de Conquistas */}
+        {activeTab === 'achievements' && (
+          <AchievementSystem 
+            playerStats={playerStats}
+            onAchievementUnlocked={handleAchievementUnlocked}
+          />
         )}
       </div>
     </div>
