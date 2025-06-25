@@ -484,7 +484,12 @@ function Sala() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const normalizedPoint = denormalizePoint({ x, y });
-    setLines(prev => [...prev, { points: [normalizedPoint] }]);
+    const line: DrawingLine = {
+      points: [normalizedPoint],
+      tool: { type: 'pen', color: '#000000', size: 3, opacity: 1 },
+      timestamp: Date.now()
+    };
+    setLines(prev => [...prev, line]);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -514,7 +519,12 @@ function Sala() {
     const x = touch.clientX - rect.left;
     const y = touch.clientY - rect.top;
     const normalizedPoint = denormalizePoint({ x, y });
-    setLines(prev => [...prev, { points: [normalizedPoint] }]);
+    const line: DrawingLine = {
+      points: [normalizedPoint],
+      tool: { type: 'pen', color: '#000000', size: 3, opacity: 1 },
+      timestamp: Date.now()
+    };
+    setLines(prev => [...prev, line]);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
