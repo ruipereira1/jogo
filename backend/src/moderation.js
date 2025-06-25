@@ -3,9 +3,12 @@
  * Filtra palavrões, spam e conteúdo inadequado
  */
 
+const Filter = require('bad-words');
+
 class ModerationSystem {
   constructor() {
-    this.profanityList = this.loadProfanityList();
+    this.filter = new Filter();
+    this.setupPortugueseWords();
     this.spamDetection = new Map(); // userId -> lastMessages[]
     this.bannedWords = new Set();
     this.warningList = new Map(); // userId -> warnings count
@@ -16,13 +19,19 @@ class ModerationSystem {
     this.similarMessageThreshold = 0.8;
   }
 
-  loadProfanityList() {
-    // Lista básica de palavrões em português
-    return new Set([
-      'badword1', 'badword2', // substituir por lista real
-      // Adicionar palavras inadequadas conforme necessário
-      'idiota', 'estupido', 'burro', 'tonto'
-    ]);
+  setupPortugueseWords() {
+    // Lista de palavrões em português
+    const portugueseBadWords = [
+      'idiota', 'estupido', 'burro', 'tonto', 'imbecil', 'otario', 'babaca',
+      'merda', 'bosta', 'porra', 'caralho', 'foda', 'puta', 'viado',
+      'bicha', 'corno', 'piranha', 'vagabundo', 'fdp', 'filho da puta',
+      'buceta', 'cu', 'rola', 'pau', 'pinto', 'cacete', 'broxa',
+      'arrombado', 'desgraça', 'desgraçado', 'maldito', 'infeliz',
+      'cretino', 'retardado', 'mongoloid', 'deficiente', 'aleijado'
+    ];
+    
+    // Adicionar palavras portuguesas ao filtro
+    this.filter.addWords(...portugueseBadWords);
   }
 
   // Filtrar mensagens de chat
@@ -114,21 +123,11 @@ class ModerationSystem {
   }
 
   filterProfanity(message) {
-    let filteredMessage = message;
-    let hasProfanity = false;
-
-    // Normalizar texto para verificação
-    const normalizedMessage = this.normalizeText(message);
-
-    for (const badWord of this.profanityList) {
-      const regex = new RegExp(badWord, 'gi');
-      if (regex.test(normalizedMessage)) {
-        hasProfanity = true;
-        // Substituir por asteriscos
-        const replacement = '*'.repeat(badWord.length);
-        filteredMessage = filteredMessage.replace(regex, replacement);
-      }
-    }
+    // Verificar se contém palavrões
+    const hasProfanity = this.filter.isProfane(message);
+    
+    // Filtrar mensagem
+    const filteredMessage = this.filter.clean(message);
 
     return {
       filteredMessage,
@@ -266,7 +265,7 @@ class ModerationSystem {
         .filter(([userId, warnings]) => warnings >= this.maxWarnings)
         .map(([userId, warnings]) => ({ userId, warnings })),
       spamCacheSize: this.spamDetection.size,
-      profanityListSize: this.profanityList.size
+      profanityFilterActive: true
     };
   }
 }

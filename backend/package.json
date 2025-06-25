@@ -15,9 +15,8 @@
     "node-cron": "^3.0.3",
     "compression": "^1.7.4",
     "helmet": "^7.0.0",
-    "rate-limiter-flexible": "^3.0.8",
-    "word-list-json": "^1.0.0",
-    "profanity-portuguese": "^1.0.2",
+    "rate-limiter-flexible": "^2.4.1",
+    "bad-words": "^3.0.4",
     "uuid": "^9.0.0",
     "lodash": "^4.17.21"
   },
