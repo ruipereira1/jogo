@@ -11,6 +11,10 @@ const { WORDS_FACIL, WORDS_MEDIO, WORDS_DIFICIL, getRandomWord } = require('./wo
 const gameManager = require('./gameLogic');
 const moderationSystem = require('./moderation');
 const rateLimitManager = require('./rateLimiter');
+const RoomManager = require('./roomManager');
+
+// Inicializar gerenciador de salas melhorado
+const roomManager = new RoomManager();
 
 const app = express();
 const server = http.createServer(app);
@@ -111,8 +115,119 @@ app.get('/api/stats', (req, res) => {
   res.json({
     rooms: gameManager.getRoomStats(),
     moderation: moderationSystem.getModerationReport(),
-    rateLimiting: rateLimitManager.getActivityReport()
+    rateLimiting: rateLimitManager.getActivityReport(),
+    globalStats: roomManager.getGlobalStats()
   });
+});
+
+// Rota para listar salas públicas
+app.get('/api/public-rooms', (req, res) => {
+  try {
+    const publicRooms = roomManager.getPublicRooms();
+    res.json({
+      success: true,
+      rooms: publicRooms,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('Erro ao buscar salas públicas:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor'
+    });
+  }
+});
+
+// Rota para estatísticas de uma sala específica
+app.get('/api/room/:roomCode/stats', (req, res) => {
+  try {
+    const { roomCode } = req.params;
+    const stats = roomManager.getRoomStats(roomCode);
+    
+    if (!stats) {
+      return res.status(404).json({
+        success: false,
+        error: 'Sala não encontrada'
+      });
+    }
+    
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas da sala:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor'
+    });
+  }
+});
+
+// Rota para criar sala com configurações avançadas
+app.post('/api/create-room-advanced', (req, res) => {
+  try {
+    const {
+      difficulty = 'facil',
+      rounds = 3,
+      category = 'all',
+      isPrivate = false,
+      password = null,
+      maxPlayers = 8,
+      allowSpectators = true,
+      customWords = [],
+      settings = {}
+    } = req.body;
+
+    // Validações básicas
+    if (isPrivate && !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Sala privada requer senha'
+      });
+    }
+
+    if (maxPlayers < 2 || maxPlayers > 12) {
+      return res.status(400).json({
+        success: false,
+        error: 'Número de jogadores deve ser entre 2 e 12'
+      });
+    }
+
+    const roomData = {
+      difficulty,
+      rounds,
+      category,
+      isPrivate,
+      password,
+      maxPlayers,
+      allowSpectators,
+      customWords,
+      ...settings
+    };
+
+    const room = roomManager.createRoom('temp-host-id', roomData);
+
+    res.json({
+      success: true,
+      roomCode: room.id,
+      room: {
+        code: room.id,
+        difficulty: room.difficulty,
+        rounds: room.maxRounds,
+        category: room.category,
+        isPrivate: room.isPrivate,
+        maxPlayers: room.maxPlayers,
+        settings: room.settings
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao criar sala avançada:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro interno do servidor'
+    });
+  }
 });
 
 // Servir arquivos estáticos em produção
@@ -133,8 +248,8 @@ app.get('/', (req, res) => {
   });
 });
 
-// Armazenamento das salas (em memória, para simplificar)
-const rooms = new Map();
+// Armazenamento das salas (mantido para compatibilidade - usando RoomManager já inicializado)
+const rooms = roomManager.rooms;
 
 // Limpeza automática de salas antigas a cada 30 minutos
 setInterval(() => {
@@ -524,11 +639,31 @@ io.on('connection', (socket) => {
       const roomData = {
         rounds: validRounds,
         difficulty: validDifficulty,
-        category: category || 'all'
+        category: category || 'all',
+        isPrivate: false, // Salas padrão são públicas
+        maxPlayers: 8
       };
 
       const room = gameManager.createRoom(roomCode, socket.id, roomData);
       gameManager.addPlayerToRoom(roomCode, player);
+      
+      // Registrar no RoomManager para funcionalidades avançadas
+      roomManager.rooms.set(roomCode, {
+        ...room,
+        id: roomCode,
+        isPrivate: false,
+        password: null,
+        settings: {
+          allowChat: true,
+          allowHints: true,
+          autoStart: false,
+          drawingTimeout: 60,
+          guessTimeout: 15,
+          showWordLength: true,
+          allowSkip: true,
+          competitiveMode: false
+        }
+      });
       
       // Manter compatibilidade com código existente
       rooms.set(roomCode, room);
@@ -1026,6 +1161,264 @@ io.on('connection', (socket) => {
     console.log(`Partida reiniciada na sala ${roomCode} com ${validRounds} rondas`);
     io.to(roomCode).emit('game-restarted');
     startRound(room, io);
+  });
+
+  // === EVENTOS PARA FUNCIONALIDADES AVANÇADAS ===
+
+  // Criar sala com configurações avançadas
+  socket.on('create-room-advanced', async (data, callback) => {
+    try {
+      const { userName, ...roomData } = data;
+      
+      // Rate limiting
+      const rateLimitCheck = await rateLimitManager.checkSocketRateLimit(socket, 'createRoom');
+      if (!rateLimitCheck.allowed) {
+        return callback({ success: false, error: rateLimitCheck.message });
+      }
+
+      // Validações
+      if (!userName || typeof userName !== 'string') {
+        return callback({ success: false, error: 'Nome de utilizador inválido' });
+      }
+
+      const trimmedUserName = userName.trim();
+      
+      // Moderação do nome de usuário
+      const usernameModeration = moderationSystem.moderateUsername(trimmedUserName);
+      if (!usernameModeration.isAllowed) {
+        return callback({ 
+          success: false, 
+          error: usernameModeration.reason,
+          suggestedName: usernameModeration.suggestedName 
+        });
+      }
+
+      // Usar RoomManager para criar sala avançada
+      const room = roomManager.createRoom(socket.id, {
+        difficulty: roomData.difficulty || 'facil',
+        rounds: roomData.rounds || 3,
+        category: roomData.category || 'all',
+        isPrivate: roomData.isPrivate || false,
+        password: roomData.password || null,
+        maxPlayers: roomData.maxPlayers || 8,
+        allowSpectators: roomData.allowSpectators !== false,
+        customWords: roomData.customWords || [],
+        settings: {
+          allowChat: roomData.settings?.allowChat !== false,
+          allowHints: roomData.settings?.allowHints !== false,
+          autoStart: roomData.settings?.autoStart || false,
+          drawingTimeout: roomData.settings?.drawingTimeout || 60,
+          guessTimeout: roomData.settings?.guessTimeout || 15,
+          showWordLength: roomData.settings?.showWordLength !== false,
+          allowSkip: roomData.settings?.allowSkip !== false,
+          competitiveMode: roomData.settings?.competitiveMode || false,
+          ...roomData.settings
+        }
+      });
+
+      // Adicionar host como jogador
+      const hostPlayer = {
+        id: socket.id,
+        name: trimmedUserName,
+        score: 0,
+        isHost: true
+      };
+
+      roomManager.addPlayer(room.id, hostPlayer);
+
+      // Manter compatibilidade com sistema existente
+      const compatibleRoom = {
+        ...room,
+        players: [hostPlayer],
+        currentDrawer: null,
+        currentWord: '',
+        timerInterval: null,
+        wordHistory: []
+      };
+
+      rooms.set(room.id, compatibleRoom);
+
+      socket.join(room.id);
+      socket.data.roomCode = room.id;
+      socket.data.userName = trimmedUserName;
+
+      console.log(`Sala avançada ${room.id} criada por ${trimmedUserName}`);
+      callback({ success: true, roomCode: room.id, room });
+      
+    } catch (error) {
+      console.error('Erro ao criar sala avançada:', error);
+      callback({ success: false, error: 'Erro interno ao criar sala' });
+    }
+  });
+
+  // Entrar em sala privada (com senha)
+  socket.on('join-private-room', async ({ userName, roomCode, password }, callback) => {
+    try {
+      if (!userName || !roomCode) {
+        return callback({ success: false, error: 'Dados incompletos' });
+      }
+
+      const room = rooms.get(roomCode.toUpperCase());
+      
+      if (!room) {
+        return callback({ success: false, error: 'Sala não encontrada' });
+      }
+
+      const roomManagerData = roomManager.rooms.get(roomCode.toUpperCase());
+      
+      if (roomManagerData?.isPrivate && roomManagerData.password !== password) {
+        return callback({ success: false, error: 'Senha incorreta' });
+      }
+
+      // Usar lógica existente de join-room
+      socket.emit('join-room', { userName, roomCode }, callback);
+
+    } catch (error) {
+      console.error('Erro ao entrar em sala privada:', error);
+      callback({ success: false, error: 'Erro interno' });
+    }
+  });
+
+  // Atualizar configurações da sala (host only)
+  socket.on('update-room-settings', ({ roomCode, settings }, callback) => {
+    try {
+      const room = rooms.get(roomCode);
+      
+      if (!room) {
+        return callback({ success: false, error: 'Sala não encontrada' });
+      }
+
+      const player = room.players.find(p => p.id === socket.id);
+      
+      if (!player || !player.isHost) {
+        return callback({ success: false, error: 'Apenas o host pode alterar configurações' });
+      }
+
+      // Atualizar no RoomManager
+      const roomManagerData = roomManager.rooms.get(roomCode);
+      if (roomManagerData) {
+        Object.assign(roomManagerData.settings, settings);
+      }
+
+      // Notificar jogadores
+      io.to(roomCode).emit('room-settings-updated', { settings });
+      
+      callback({ success: true });
+      
+    } catch (error) {
+      console.error('Erro ao atualizar configurações:', error);
+      callback({ success: false, error: 'Erro interno' });
+    }
+  });
+
+  // Banir jogador (host only)
+  socket.on('ban-player', ({ roomCode, playerId, reason }, callback) => {
+    try {
+      const room = rooms.get(roomCode);
+      
+      if (!room) {
+        return callback({ success: false, error: 'Sala não encontrada' });
+      }
+
+      const host = room.players.find(p => p.id === socket.id);
+      
+      if (!host || !host.isHost) {
+        return callback({ success: false, error: 'Apenas o host pode banir jogadores' });
+      }
+
+      const targetPlayer = room.players.find(p => p.id === playerId);
+      
+      if (!targetPlayer) {
+        return callback({ success: false, error: 'Jogador não encontrado' });
+      }
+
+      // Usar sistema de moderação
+      moderationSystem.banUser(playerId, targetPlayer.name, reason || 'Banido pelo host');
+
+      // Remover jogador
+      const targetSocket = io.sockets.sockets.get(playerId);
+      if (targetSocket) {
+        targetSocket.emit('banned', { reason });
+        targetSocket.leave(roomCode);
+      }
+
+      room.players = room.players.filter(p => p.id !== playerId);
+
+      io.to(roomCode).emit('player-banned', {
+        playerId,
+        playerName: targetPlayer.name,
+        reason,
+        players: room.players
+      });
+
+      callback({ success: true });
+      
+    } catch (error) {
+      console.error('Erro ao banir jogador:', error);
+      callback({ success: false, error: 'Erro interno' });
+    }
+  });
+
+  // Adicionar palavra personalizada
+  socket.on('add-custom-word', ({ roomCode, word }, callback) => {
+    try {
+      const room = rooms.get(roomCode);
+      
+      if (!room) {
+        return callback({ success: false, error: 'Sala não encontrada' });
+      }
+
+      const player = room.players.find(p => p.id === socket.id);
+      
+      if (!player || !player.isHost) {
+        return callback({ success: false, error: 'Apenas o host pode adicionar palavras' });
+      }
+
+      if (!word || typeof word !== 'string' || word.trim().length < 2) {
+        return callback({ success: false, error: 'Palavra inválida' });
+      }
+
+      const trimmedWord = word.trim().toLowerCase();
+
+      // Moderação da palavra
+      const moderation = moderationSystem.moderateMessage(socket.id, player.name, trimmedWord);
+      
+      if (!moderation.isAllowed) {
+        return callback({ success: false, error: 'Palavra não permitida' });
+      }
+
+      const roomManagerData = roomManager.rooms.get(roomCode);
+      if (roomManagerData) {
+        if (!roomManagerData.customWords) {
+          roomManagerData.customWords = [];
+        }
+        
+        if (roomManagerData.customWords.length >= 100) {
+          return callback({ success: false, error: 'Máximo de 100 palavras personalizadas' });
+        }
+        
+        if (!roomManagerData.customWords.includes(trimmedWord)) {
+          roomManagerData.customWords.push(trimmedWord);
+        }
+      }
+
+      callback({ success: true });
+      
+    } catch (error) {
+      console.error('Erro ao adicionar palavra personalizada:', error);
+      callback({ success: false, error: 'Erro interno' });
+    }
+  });
+
+  // Obter estatísticas da sala
+  socket.on('get-room-stats', ({ roomCode }, callback) => {
+    try {
+      const stats = roomManager.getRoomStats(roomCode);
+      callback({ success: true, stats });
+    } catch (error) {
+      console.error('Erro ao obter estatísticas:', error);
+      callback({ success: false, error: 'Erro interno' });
+    }
   });
 });
 

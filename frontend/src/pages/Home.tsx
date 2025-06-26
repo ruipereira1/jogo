@@ -96,6 +96,7 @@ function Home() {
         {/* Action Buttons */}
         <div className="flex flex-col mobile:gap-3 sm:gap-4 w-full">
           <button
+            data-tutorial="create-room"
             className="ios-button mobile:min-h-touch bg-gradient-to-r from-yellow-400 to-yellow-300 text-blue-900 mobile:px-6 mobile:py-4 sm:px-8 sm:py-4 rounded-2xl font-bold shadow-xl hover:shadow-2xl transition-all duration-300 mobile:text-base-mobile sm:text-lg flex items-center justify-center gap-3 tap-feedback transform hover:scale-105"
             onClick={() => navigate('/criar-sala')}
           >
@@ -104,16 +105,26 @@ function Home() {
           </button>
           
           <button
+            data-tutorial="join-room"
             className="ios-button mobile:min-h-touch bg-white/20 backdrop-blur-sm text-white mobile:px-6 mobile:py-4 sm:px-8 sm:py-4 rounded-2xl font-bold shadow-xl hover:shadow-2xl transition-all duration-300 mobile:text-base-mobile sm:text-lg flex items-center justify-center gap-3 tap-feedback border border-white/30 hover:bg-white/30"
             onClick={() => navigate('/entrar-sala')}
           >
             <span className="text-2xl">🚪</span>
             Entrar em Sala
           </button>
+          
+          {/* Novo botão para salas públicas */}
+          <button
+            className="ios-button mobile:min-h-touch bg-purple-500/20 backdrop-blur-sm text-white mobile:px-6 mobile:py-3 sm:px-8 sm:py-3 rounded-2xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 mobile:text-sm-mobile sm:text-base flex items-center justify-center gap-2 tap-feedback border border-purple-300/30 hover:bg-purple-500/30"
+            onClick={() => navigate('/salas-publicas')}
+          >
+            <span className="text-xl">🌐</span>
+            Salas Públicas
+          </button>
         </div>
 
         {/* Features Grid */}
-        <div className="grid grid-cols-2 gap-3 mt-8 w-full">
+        <div data-tutorial="features" className="grid grid-cols-2 gap-3 mt-8 w-full">
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 text-center border border-white/20">
             <div className="text-2xl mb-1">👥</div>
             <div className="mobile:text-xs-mobile sm:text-sm font-medium">Até 8 jogadores</div>
