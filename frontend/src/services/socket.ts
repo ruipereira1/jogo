@@ -67,7 +67,7 @@ class SocketService {
   private user: { id: string; name: string } | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
-  private reconnectInterval: number | null = null;
+  private reconnectInterval: NodeJS.Timeout | null = null;
   private isConnected = false;
   private reconnectData = { roomCode: '', userName: '' };
 
@@ -287,9 +287,12 @@ class SocketService {
   }
 
   private async reconnectToRoom(userName: string, roomCode: string): Promise<ReconnectResponse> {
-    // Implemente a lógica para reconectar à sala e retornar o resultado
-    // Este é um exemplo básico e deve ser ajustado de acordo com a sua implementação
-    return { success: true, gameState: { status: 'connected', round: 1, maxRounds: 3, currentDrawer: 'John', isDrawer: true, timeLeft: 120 } };
+    return new Promise((resolve) => {
+      const socket = this.getSocket();
+      socket.emit('reconnect-to-room', { userName, roomCode }, (response: ReconnectResponse) => {
+        resolve(response);
+      });
+    });
   }
 
   private clearReconnectData() {

@@ -681,16 +681,13 @@ io.on('connection', (socket) => {
         delete existingPlayer.disconnectTime;
         
         // Remover timeout de reconexão específico deste jogador se existir
-        if (room.reconnectTimeouts) {
-          room.reconnectTimeouts = room.reconnectTimeouts.filter(timeoutId => {
-            // Tentar cancelar o timeout (pode já ter expirado)
-            try {
-              clearTimeout(timeoutId);
-              return false; // Remove da lista
-            } catch (e) {
-              return false; // Remove da lista mesmo se já expirou
-            }
-          });
+        if (room.reconnectTimeouts && existingPlayer.reconnectTimeoutId) {
+          const timeoutIndex = room.reconnectTimeouts.indexOf(existingPlayer.reconnectTimeoutId);
+          if (timeoutIndex > -1) {
+            clearTimeout(existingPlayer.reconnectTimeoutId);
+            room.reconnectTimeouts.splice(timeoutIndex, 1);
+            delete existingPlayer.reconnectTimeoutId;
+          }
         }
         
         // Associar o socket à sala
@@ -767,6 +764,9 @@ io.on('connection', (socket) => {
               handlePlayerRemoval(roomCode, socket.id, userName, room, io);
             }
           }, 30000); // 30 segundos
+          
+          // Guardar o timeoutId no jogador para poder cancelar depois
+          player.reconnectTimeoutId = timeoutId;
           
           // Adicionar timeout à lista para limpeza posterior
           if (!room.reconnectTimeouts) room.reconnectTimeouts = [];
@@ -863,6 +863,12 @@ io.on('connection', (socket) => {
       });
     // Lógica de pontuação dinâmica
     if (isCorrect) {
+      // Verificar se há drawer ativo antes de continuar
+      if (!room.currentDrawer || room.status !== 'playing') {
+        console.warn('Palpite correto ignorado: não há drawer ativo ou jogo não está ativo');
+        return;
+      }
+
       // Adicionar ao histórico quem acertou
       if (room.wordHistory && room.wordHistory.length > 0) {
         const currentRoundHistory = room.wordHistory[room.wordHistory.length - 1];
@@ -872,27 +878,28 @@ io.on('connection', (socket) => {
       }
       
       // Calcular pontos com base no tempo restante
-      let timeLeft = 0;
-      if (room.timerInterval && room.timePerRound) {
-        // Encontrar o tempo restante do último timer-update enviado
-        // Como não guardamos o timeLeft, vamos estimar pelo tempoPerRound e pelo round
-        // Melhor: guardar timeLeft no room a cada timer-update
-        // (Implementação rápida: guardar timeLeft no room)
-      }
-      // Se não existir, usar 0
-      timeLeft = room._lastTimeLeft || 0;
+      const timeLeft = room._lastTimeLeft || 45;
+      
       // Pontuação: 10 + (tempoRestante / 5) para quem acerta
       const playerPoints = 10 + Math.floor(timeLeft / 5);
       const drawerPoints = 5;
+      
       // Jogador que acertou ganha pontos proporcionais ao tempo
       const player = room.players.find(p => p.id === socket.id);
-      if (player) player.score += playerPoints;
+      if (player) {
+        player.score += playerPoints;
+      } else {
+        console.warn('Jogador não encontrado para adicionar pontos');
+        return;
+      }
+      
       // Desenhista ganha sempre 5 pontos fixos
       const drawer = room.players.find(p => p.id === room.currentDrawer);
       if (drawer) {
         drawer.score += drawerPoints;
       } else {
-        console.warn('Drawer não encontrado para adicionar pontos');
+        console.warn('Drawer não encontrado para adicionar pontos - Round pode estar corrompido');
+        return;
       }
       // Atualizar todos os jogadores com a nova lista de pontuações
       io.to(roomCode).emit('players-update', {

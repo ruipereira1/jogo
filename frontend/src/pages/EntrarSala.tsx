@@ -222,14 +222,8 @@ function EntrarSala() {
     setShowQrScanner(false);
     setQrScannerError('');
     
-    // Parar todas as tracks de vídeo
-    navigator.mediaDevices.getUserMedia({ video: true })
-      .then(stream => {
-        stream.getTracks().forEach(track => track.stop());
-      })
-      .catch(() => {
-        // Ignorar erros ao parar o stream
-      });
+    // Parar o stream ativo se existir (será gerenciado pelo startQrScanner)
+    // O cleanup será feito automaticamente pelo useEffect do startQrScanner
   };
 
       return (

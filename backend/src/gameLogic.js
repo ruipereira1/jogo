@@ -250,41 +250,134 @@ class GameManager extends EventEmitter {
   }
 
   startRoundTimer(room) {
-    const timerId = setTimeout(() => {
-      this.endRound(room);
-    }, room.timePerRound * 1000);
+    this.clearRoomTimers(room.id);
 
-    // Armazenar timer para possível cancelamento
-    this.gameTimers.set(`${room.id}:round`, timerId);
+    const roundDuration = room.settings.drawingTimeout;
+    let timeLeft = roundDuration;
+    
+    const hintsConfig = [
+      { time: roundDuration * 0.75, type: 'length' },
+      { time: roundDuration * 0.5, type: 'first_last' },
+      { time: roundDuration * 0.25, type: 'vowel' }
+    ];
+
+    const timer = setInterval(() => {
+      timeLeft--;
+      room.timeLeft = timeLeft;
+
+      // Enviar dicas em tempos específicos
+      const hintToSend = hintsConfig.find(h => Math.abs(h.time - timeLeft) < 1);
+      if (hintToSend && room.settings.allowHints) {
+        const hint = this.generateHint(room.currentWord, hintToSend.type, room.category);
+        if (hint) {
+          this.emit('hint', room, hint);
+        }
+      }
+
+      if (timeLeft <= 0) {
+        this.endRound(room);
+      } else {
+        this.emit('timerUpdate', room, timeLeft);
+      }
+    }, 1000);
+
+    this.gameTimers.set(room.id, timer);
+  }
+
+  generateHint(word, type, category = 'all') {
+    const wordLower = word.toLowerCase();
+    let hintText = '';
+    let hintType = 'info';
+
+    switch (type) {
+      case 'length':
+        hintText = `A palavra tem ${word.length} letras.`;
+        break;
+      case 'first_last':
+        hintText = `Começa com '${word[0]}' e termina com '${word[word.length - 1]}'.`;
+        break;
+      case 'vowel':
+        const vowels = 'aeiou';
+        const wordVowels = [...wordLower].filter(char => vowels.includes(char));
+        if (wordVowels.length > 0) {
+          const randomVowel = wordVowels[Math.floor(Math.random() * wordVowels.length)];
+          hintText = `A palavra contém a vogal '${randomVowel}'.`;
+        }
+        break;
+      case 'category':
+        if (category && category !== 'all') {
+          hintText = `Categoria: ${category}`;
+        }
+        break;
+      default:
+        // Por defeito, mostra o padrão da palavra (ex: _ _ R _ A)
+        const revealedChars = Math.floor(word.length / 3);
+        let revealed = Array(word.length).fill('_');
+        for (let i = 0; i < revealedChars; i++) {
+          let randomIndex;
+          do {
+            randomIndex = Math.floor(Math.random() * word.length);
+          } while (revealed[randomIndex] !== '_');
+          revealed[randomIndex] = word[randomIndex];
+        }
+        hintText = revealed.join(' ');
+        hintType = 'pattern';
+        break;
+    }
+    
+    if (hintText) {
+      return { hint: hintText, type: hintType };
+    }
+    return null;
   }
 
   endRound(room) {
-    // Limpar timer
-    const timerId = this.gameTimers.get(`${room.id}:round`);
+    const timerId = this.gameTimers.get(room.id);
     if (timerId) {
-      clearTimeout(timerId);
-      this.gameTimers.delete(`${room.id}:round`);
+      clearInterval(timerId);
+      this.gameTimers.delete(room.id);
     }
-
-    // Adicionar ao histórico
-    if (room.currentRoundStats) {
-      room.wordHistory.push({
-        round: room.round,
-        word: room.currentWord,
-        drawer: room.currentRoundStats.drawer,
-        guessedBy: room.currentRoundStats.correctGuesses.map(g => g.playerName),
-        stats: room.currentRoundStats
-      });
-    }
-
-    this.emit('roundEnded', room);
     
-    // Iniciar próxima ronda após delay
-    setTimeout(() => {
-      if (room.status === 'playing') {
-        this.startNextRound(room);
-      }
-    }, 3000);
+    // Assegurar que currentRoundStats existe
+    if (!room.currentRoundStats) {
+      // Se não houver estatísticas da ronda (ex: desenhista saiu logo), apenas começa a próxima
+      this.startNextRound(room);
+      return;
+    }
+
+    const { word, drawer, correctGuesses } = room.currentRoundStats;
+    
+    // Construir o sumário da ronda
+    const summary = {
+      word,
+      drawer,
+      players: room.players.map(p => {
+        const correctGuess = correctGuesses.find(g => g.playerId === p.id);
+        return {
+          id: p.id,
+          name: p.name,
+          score: p.score,
+          pointsGained: correctGuess ? correctGuess.points : 0
+        };
+      })
+    };
+
+    room.wordHistory.push({
+      round: room.round,
+      word,
+      drawer,
+      guessedBy: correctGuesses.map(g => g.playerName)
+    });
+    
+    this.emit('roundSummary', room, summary);
+
+    // Agendar o início da próxima ronda após um breve intervalo para o sumário
+    const summaryDuration = 7000; // 7 segundos para o sumário
+    const nextRoundTimer = setTimeout(() => {
+      this.startNextRound(room);
+    }, summaryDuration);
+
+    this.gameTimers.set(`${room.id}:nextRound`, nextRoundTimer);
   }
 
   endGame(room) {
@@ -317,8 +410,9 @@ class GameManager extends EventEmitter {
   clearRoomTimers(roomId) {
     // Limpar todos os timers relacionados a esta sala
     for (const [key, timerId] of this.gameTimers.entries()) {
-      if (key.startsWith(`${roomId}:`)) {
-        clearTimeout(timerId);
+      if (key === roomId || key.startsWith(`${roomId}:`)) {
+        clearInterval(timerId); // Usar clearInterval para timers de jogo
+        clearTimeout(timerId);  // E clearTimeout para próximas rondas
         this.gameTimers.delete(key);
       }
     }
