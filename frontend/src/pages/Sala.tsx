@@ -4,6 +4,7 @@ import socketService from '../services/socket';
 import Canvas, { DrawingLine, DrawingData } from '../components/Canvas';
 import GameStats from '../components/GameStats';
 import AchievementSystem from '../components/AchievementSystem';
+import DrawingTools, { DrawingTool } from '../components/DrawingTools';
 
 interface Player {
   id: string;
@@ -12,13 +13,17 @@ interface Player {
   isHost: boolean;
 }
 
-// Interface DrawingLine importada do Canvas
-
 interface WordHistoryEntry {
   round: number;
   word: string;
   drawer: string;
   guessedBy: string[];
+}
+
+interface GameState {
+  phase: 'waiting' | 'countdown' | 'drawing' | 'guessing' | 'revealing' | 'round-end' | 'game-end';
+  timeLeft?: number;
+  message?: string;
 }
 
 function Sala() {
@@ -36,7 +41,7 @@ function Sala() {
   const [lines, setLines] = useState<DrawingLine[]>([]);
   const [drawing, setDrawing] = useState(false);
   const [guess, setGuess] = useState('');
-  const [guesses, setGuesses] = useState<{ name: string; text: string; correct: boolean }[]>([]);
+  const [guesses, setGuesses] = useState<{ name: string; text: string; correct: boolean; timestamp: number }[]>([]);
   const [guessedCorrectly, setGuessedCorrectly] = useState(false);
   const [winnerName, setWinnerName] = useState<string | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
@@ -54,8 +59,8 @@ function Sala() {
   const [toastMessage, setToastMessage] = useState('');
   const [showShareModal, setShowShareModal] = useState(false);
   
-  // Novos estados para melhorias
-  const [hints, setHints] = useState<{ hint: string; type: string }[]>([]);
+  // Estados melhorados para a nova interface
+  const [hints, setHints] = useState<{ hint: string; type: string; timestamp: number }[]>([]);
   const [revealedWord, setRevealedWord] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<{ name: string; message: string; timestamp: number }[]>([]);
   const [chatMessage, setChatMessage] = useState('');
@@ -64,8 +69,20 @@ function Sala() {
   const [showHistory, setShowHistory] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
-  const [isHorizontalMode, setIsHorizontalMode] = useState(false);
-  const [isLandscapeMode, setIsLandscapeMode] = useState(false);
+  const [gameState, setGameState] = useState<GameState>({ phase: 'waiting' });
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  
+  // Estados para ferramentas de desenho avançadas
+  const [currentTool, setCurrentTool] = useState<DrawingTool>({
+    type: 'pen',
+    color: '#000000',
+    size: 3,
+    opacity: 1
+  });
+  const [undoStack, setUndoStack] = useState<DrawingLine[][]>([]);
+  const [redoStack, setRedoStack] = useState<DrawingLine[][]>([]);
   
   // Estados para conquistas e estatísticas avançadas
   const [playerStats, setPlayerStats] = useState({
@@ -83,6 +100,15 @@ function Sala() {
   const [currentStreak, setCurrentStreak] = useState(0);
   const [showAchievements, setShowAchievements] = useState(false);
   const [activeTab, setActiveTab] = useState<'game' | 'stats' | 'achievements'>('game');
+  const [showRoundTransition, setShowRoundTransition] = useState(false);
+  const [roundTransitionData, setRoundTransitionData] = useState<{
+    type: 'start' | 'end';
+    round: number;
+    maxRounds: number;
+    word?: string;
+    drawer?: string;
+    nextDrawer?: string;
+  } | null>(null);
 
   // Refs para armazenar timeouts e intervalos para limpeza
   const timeoutRefs = useRef<number[]>([]);
@@ -91,7 +117,6 @@ function Sala() {
   const addTimeout = (callback: () => void, delay: number) => {
     const timeoutId = window.setTimeout(() => {
       callback();
-      // Remover o timeout da lista após execução
       timeoutRefs.current = timeoutRefs.current.filter(id => id !== timeoutId);
     }, delay);
     timeoutRefs.current.push(timeoutId);
@@ -104,26 +129,6 @@ function Sala() {
     timeoutRefs.current = [];
   };
 
-  // Adicionar viewport meta tag para mobile através do useEffect
-  useEffect(() => {
-    const viewport = document.querySelector('meta[name="viewport"]');
-    if (viewport) {
-      viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
-    } else {
-      const meta = document.createElement('meta');
-      meta.name = 'viewport';
-      meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-      document.getElementsByTagName('head')[0].appendChild(meta);
-    }
-
-    return () => {
-      // Restaurar viewport original quando componente for desmontado
-      if (viewport) {
-        viewport.setAttribute('content', 'width=device-width, initial-scale=1.0');
-      }
-    };
-  }, []);
-
   // Função para calcular o tamanho do canvas com base no container
   const updateCanvasSize = () => {
     if (canvasContainerRef.current) {
@@ -132,24 +137,83 @@ function Sala() {
       const screenHeight = window.innerHeight;
       let newWidth, newHeight;
       
-      if (isHorizontalMode) {
-        // Modo horizontal: usar quase toda a largura disponível
-        newWidth = Math.min(containerWidth - 10, screenWidth - 20);
-        newHeight = Math.floor(Math.min(newWidth * 0.6, screenHeight * 0.4)); // Proporção mais larga
+      if (isFullscreen) {
+        newWidth = Math.min(containerWidth - 20, screenWidth * 0.9);
+        newHeight = Math.floor(Math.min(newWidth * 0.6, screenHeight * 0.6));
       } else {
-        // Modo vertical normal
-        if (screenWidth < 480) { // Telefones pequenos
-          newWidth = Math.min(300, containerWidth - 10);
-        } else if (screenWidth < 768) { // Telefones maiores
-          newWidth = Math.min(400, containerWidth - 15);
-        } else { // Tablets e desktop
-          newWidth = Math.min(500, containerWidth - 20);
+        if (screenWidth < 480) {
+          newWidth = Math.min(320, containerWidth - 10);
+        } else if (screenWidth < 768) {
+          newWidth = Math.min(450, containerWidth - 15);
+        } else {
+          newWidth = Math.min(600, containerWidth - 20);
         }
-        newHeight = Math.floor(newWidth * 0.7); // Manter proporção de aspecto normal
+        newHeight = Math.floor(newWidth * 0.7);
       }
       
       setCanvasSize({ width: newWidth, height: newHeight });
     }
+  };
+
+  // Sons para feedback
+  const playSound = (type: 'correct' | 'wrong' | 'hint' | 'timer' | 'round-start' | 'round-end') => {
+    if (!soundEnabled) return;
+    
+    // Criar um tom simples usando Web Audio API
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    let frequency = 440;
+    let duration = 0.2;
+    
+    switch (type) {
+      case 'correct':
+        frequency = 800;
+        duration = 0.5;
+        break;
+      case 'wrong':
+        frequency = 200;
+        duration = 0.3;
+        break;
+      case 'hint':
+        frequency = 600;
+        duration = 0.2;
+        break;
+      case 'timer':
+        frequency = 300;
+        duration = 0.1;
+        break;
+      case 'round-start':
+        frequency = 1000;
+        duration = 0.3;
+        break;
+      case 'round-end':
+        frequency = 500;
+        duration = 0.8;
+        break;
+    }
+    
+    oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + duration);
+  };
+
+  // Função para mostrar transição de round
+  const showRoundTransitionAnimation = (data: typeof roundTransitionData) => {
+    setRoundTransitionData(data);
+    setShowRoundTransition(true);
+    
+    addTimeout(() => {
+      setShowRoundTransition(false);
+      setRoundTransitionData(null);
+    }, 3000);
   };
 
   // Atualizar o tamanho do canvas quando a janela for redimensionada
@@ -159,34 +223,16 @@ function Sala() {
     return () => window.removeEventListener('resize', updateCanvasSize);
   }, []);
 
-  // Atualizar canvas quando o modo horizontal mudar
+  // Atualizar canvas quando o modo fullscreen mudar
   useEffect(() => {
     updateCanvasSize();
-  }, [isHorizontalMode]);
-
-  // Detectar orientação da tela automaticamente
-  useEffect(() => {
-    const handleOrientationChange = () => {
-      const isLandscape = window.innerHeight < window.innerWidth && window.innerHeight <= 600;
-      setIsLandscapeMode(isLandscape);
-    };
-
-    handleOrientationChange();
-    window.addEventListener('resize', handleOrientationChange);
-    window.addEventListener('orientationchange', handleOrientationChange);
-
-    return () => {
-      window.removeEventListener('resize', handleOrientationChange);
-      window.removeEventListener('orientationchange', handleOrientationChange);
-    };
-  }, []);
+  }, [isFullscreen]);
 
   useEffect(() => {
     const socket = socketService.getSocket();
     const user = socketService.getUser();
 
     if (!user || !roomCode) {
-      // Usuário não está logado ou não tem código de sala
       navigate('/');
       return;
     }
@@ -198,94 +244,121 @@ function Sala() {
 
     socket.on('player-left', ({ players }) => {
       setPlayers(players);
-      
-      // Verificar se não há mais jogadores na sala (incluindo o usuário atual)
-      if (players.length === 0) {
-        navigate('/');
-      }
     });
 
-    socket.on('players-update', ({ players, drawerId, round, maxRounds }) => {
+    socket.on('room-joined', ({ room, players }) => {
       setPlayers(players);
-      setDrawerId(drawerId);
-      setRound(round);
-      if (maxRounds) setMaxRounds(maxRounds);
+      setRound(room.round || 1);
+      setMaxRounds(room.maxRounds || 3);
+      setIsLoading(false);
+      setGameState({ phase: room.status === 'playing' ? 'drawing' : 'waiting' });
+    });
+
+    socket.on('players-update', ({ players: updatedPlayers, drawerId: newDrawerId, round: currentRound, maxRounds: totalRounds }) => {
+      setPlayers(updatedPlayers);
+      setDrawerId(newDrawerId);
+      setRound(currentRound);
+      setMaxRounds(totalRounds);
+      setIsDrawer(newDrawerId === user.id);
     });
 
     socket.on('game-started', () => {
       setIsGameStarted(true);
+      setGameState({ phase: 'countdown' });
+      playSound('round-start');
     });
 
-    socket.on('round-start', ({ isDrawer, word }) => {
-      setIsDrawer(isDrawer);
-      setWord(isDrawer ? word : null);
+    socket.on('round-start', ({ isDrawer: userIsDrawer, word: gameWord }) => {
+      setIsDrawer(userIsDrawer);
+      setWord(userIsDrawer ? gameWord : null);
       setGuesses([]);
       setGuessedCorrectly(false);
       setWinnerName(null);
-    });
-
-    // Receber linhas desenhadas de outros jogadores
-    socket.on('draw-line', (line: DrawingLine) => {
-      setLines(prev => [...prev, line]);
+      setRevealedWord(null);
+      setHints([]);
+      setGameState({ phase: 'drawing' });
+      
+      // Mostrar transição de início de round
+      const drawer = players.find(p => p.id === drawerId);
+      showRoundTransitionAnimation({
+        type: 'start',
+        round,
+        maxRounds,
+        drawer: drawer?.name
+      });
+      
+      playSound('round-start');
     });
 
     socket.on('guess', ({ name, text, correct }) => {
-      setGuesses(prev => [...prev, { name, text, correct }]);
+      const newGuess = { name, text, correct, timestamp: Date.now() };
+      setGuesses(prev => [...prev, newGuess]);
+      
       if (correct) {
         setWinnerName(name);
+        setGameState({ phase: 'revealing' });
+        playSound('correct');
         
-        // Atualizar estatísticas se o usuário acertou
-        if (name === socketService.getUser()?.name) {
+        if (name === user?.name) {
           setGuessedCorrectly(true);
           setCurrentStreak(prev => prev + 1);
-          
           setPlayerStats(prev => ({
             ...prev,
             totalCorrectGuesses: prev.totalCorrectGuesses + 1,
             longestStreak: Math.max(prev.longestStreak, currentStreak + 1)
           }));
         }
-      } else if (name === socketService.getUser()?.name) {
-        // Reset streak se o usuário errou
-        setCurrentStreak(0);
+      } else {
+        if (name === user?.name) {
+          setCurrentStreak(0);
+          playSound('wrong');
+        }
       }
     });
 
-    // Simular recebimento de jogadores iniciais
-    // (Em uma implementação completa, isso viria do evento de entrada na sala)
-    // Para simplificar, estamos apenas adicionando o próprio usuário
-    
     socket.on('clear-canvas', () => {
       setLines([]);
+      setUndoStack([]);
+      setRedoStack([]);
     });
 
     socket.on('timer-update', ({ timeLeft }) => {
       setTimer(timeLeft);
+      
+      // Sons de alerta nos últimos segundos
+      if (timeLeft <= 5 && timeLeft > 0) {
+        playSound('timer');
+      }
+      
+      setGameState(prev => ({ ...prev, timeLeft }));
     });
 
     socket.on('round-ended', ({ reason, message }) => {
+      setGameState({ phase: 'round-end', message });
+      
       if (reason === 'timeout') {
         setRoundEnded(true);
-        addTimeout(() => setRoundEnded(false), 4000); // Esconde a mensagem após 4 segundos
+        addTimeout(() => setRoundEnded(false), 4000);
       } else if (reason === 'drawer-left') {
-        // Mostrar mensagem especial quando o desenhista sai
         setToastMessage(message || 'O desenhista saiu da sala. Avançando para próxima ronda...');
         setShowToast(true);
         addTimeout(() => setShowToast(false), 4000);
       }
+      
+      playSound('round-end');
     });
 
     socket.on('countdown', ({ value, round: countdownRound, maxRounds: countdownMaxRounds }) => {
       setCountdown(value > 0 ? value : null);
       setIsLastRoundCountdown(countdownRound === countdownMaxRounds && value > 0 && value <= 3);
+      setGameState({ phase: value > 0 ? 'countdown' : 'drawing' });
     });
 
     socket.on('game-ended', ({ players }) => {
-      // Ordenar por pontuação decrescente
       const sorted = [...players].sort((a, b) => b.score - a.score);
       setPodium(sorted);
+      setGameState({ phase: 'game-end' });
       
-      // Atualizar estatísticas do jogador
       const currentUser = socketService.getUser();
       const userPlayer = players.find((p: Player) => p.name === currentUser?.name);
       
@@ -299,7 +372,6 @@ function Sala() {
         }));
       }
       
-      // Reset streak
       setCurrentStreak(0);
     });
 
@@ -311,14 +383,13 @@ function Sala() {
       setWinnerName(null);
       setGuesses([]);
       setIsGameStarted(false);
+      setGameState({ phase: 'waiting' });
     });
     
-    // Escutar evento quando a sala é excluída (todos saíram)
     socket.on('room-deleted', () => {
       navigate('/');
     });
     
-    // Escutar evento quando a sala não é encontrada
     socket.on('room-not-found', () => {
       setError('Sala não encontrada ou foi excluída');
       setTimeout(() => {
@@ -326,11 +397,13 @@ function Sala() {
       }, 3000);
     });
     
-    // Novos listeners para as melhorias
+    // Listeners melhorados para dicas
     socket.on('hint', ({ hint, type }) => {
-      setHints(prev => [...prev, { hint, type }]);
-      setToastMessage(hint);
+      const newHint = { hint, type, timestamp: Date.now() };
+      setHints(prev => [...prev, newHint]);
+      setToastMessage(`💡 ${hint}`);
       setShowToast(true);
+      playSound('hint');
       addTimeout(() => setShowToast(false), 4000);
     });
 
@@ -338,94 +411,36 @@ function Sala() {
       setRevealedWord(word);
       setToastMessage(`A palavra era: ${word}`);
       setShowToast(true);
+      
+      // Mostrar transição de fim de round
+      showRoundTransitionAnimation({
+        type: 'end',
+        round,
+        maxRounds,
+        word
+      });
+      
       addTimeout(() => {
         setShowToast(false);
         setRevealedWord(null);
       }, 5000);
     });
 
-    socket.on('chat-message', ({ name, message, timestamp }) => {
-      setChatMessages(prev => [...prev, { name, message, timestamp }]);
+    // Listeners para desenho
+    socket.on('draw-line', ({ line }) => {
+      setLines(prev => [...prev, line]);
     });
 
-    // Sistema de reconexão
-    socket.on('connect', () => {
-      setConnectionStatus('connected');
-      setIsReconnecting(false);
-      if (roomCode && user) {
-        // Tentar reentrar na sala após reconexão
-        socket.emit('join-room', { userName: user.name, roomCode }, (response: { success: boolean; error?: string }) => {
-          if (!response.success) {
-            setError('Erro ao reconectar à sala');
-          }
-        });
-      }
-    });
-
-    socket.on('disconnect', () => {
-      setConnectionStatus('disconnected');
-      setIsReconnecting(true);
-    });
-
-    socket.on('reconnect', () => {
-      setConnectionStatus('connected');
-      setIsReconnecting(false);
-    });
-
-    // Novos eventos para melhor handling de desconexões
-    socket.on('player-temporarily-disconnected', ({ playerId, playerName }) => {
-      setToastMessage(`${playerName} foi temporariamente desconectado`);
-      setShowToast(true);
-      addTimeout(() => setShowToast(false), 3000);
-    });
-
-    socket.on('player-reconnected', ({ playerId, playerName, players }) => {
-      setPlayers(players);
-      setToastMessage(`${playerName} reconectou!`);
-      setShowToast(true);
-      addTimeout(() => setShowToast(false), 3000);
-    });
-
-    // Event listener para reconexão automática de sala
-    const handleRoomReconnected = (event: CustomEvent) => {
-      const { gameState } = event.detail;
-      if (gameState) {
-        setRound(gameState.round);
-        setMaxRounds(gameState.maxRounds);
-        setDrawerId(gameState.currentDrawer);
-        setIsDrawer(gameState.isDrawer);
-        setTimer(gameState.timeLeft);
-        
-        setToastMessage('Reconectado à sala com sucesso!');
-        setShowToast(true);
-        addTimeout(() => setShowToast(false), 3000);
-      }
-    };
-
-    const handleConnectionError = () => {
-      setError('Falha na conexão. Tentando reconectar...');
-      addTimeout(() => {
-        if (connectionStatus === 'disconnected') {
-          navigate('/');
-        }
-      }, 10000); // Redirecionar para home após 10 segundos se não reconectar
-    };
-
-    // Adicionar event listeners customizados
-    window.addEventListener('roomReconnected', handleRoomReconnected as EventListener);
-    window.addEventListener('connectionError', handleConnectionError);
-
-    setIsLoading(false);
+    // Entrar na sala
+    socket.emit('join-room', { roomCode, userName: user.name });
 
     return () => {
-      // Limpar timeouts ativos
-      clearAllTimeouts();
-      
-      // Limpar listeners ao sair
       socket.off('player-joined');
       socket.off('player-left');
+      socket.off('room-joined');
       socket.off('players-update');
-      socket.off('draw-line');
+      socket.off('game-started');
+      socket.off('round-start');
       socket.off('guess');
       socket.off('clear-canvas');
       socket.off('timer-update');
@@ -437,21 +452,12 @@ function Sala() {
       socket.off('room-not-found');
       socket.off('hint');
       socket.off('word-reveal');
-      socket.off('chat-message');
-      socket.off('connect');
-      socket.off('disconnect');
-      socket.off('reconnect');
-      socket.off('player-temporarily-disconnected');
-      socket.off('player-reconnected');
-      
-      // Remover event listeners customizados
-      window.removeEventListener('roomReconnected', handleRoomReconnected as EventListener);
-      window.removeEventListener('connectionError', handleConnectionError);
+      socket.off('draw-line');
+      clearAllTimeouts();
     };
-  }, [roomCode, navigate, connectionStatus]);
+  }, [roomCode, navigate, currentStreak, round, players, drawerId, maxRounds, user]);
 
   const handleLeaveRoom = () => {
-    // Limpar dados de sala e desconectar do socket
     socketService.leaveRoom();
     socketService.disconnect();
     navigate('/');
@@ -459,6 +465,35 @@ function Sala() {
 
   const handleStartGame = () => {
     socketService.getSocket().emit('start-game', { roomCode });
+  };
+
+  // Funções para ferramentas de desenho
+  const handleToolChange = (tool: DrawingTool) => {
+    setCurrentTool(tool);
+  };
+
+  const handleUndo = () => {
+    if (lines.length > 0) {
+      const newUndoStack = [...undoStack, lines];
+      const newLines = lines.slice(0, -1);
+      setUndoStack(newUndoStack);
+      setLines(newLines);
+      setRedoStack([]);
+      
+      // Enviar comando de desfazer para outros jogadores
+      socketService.getSocket().emit('undo', { roomCode });
+    }
+  };
+
+  const handleRedo = () => {
+    if (redoStack.length > 0) {
+      const lastUndoState = redoStack[redoStack.length - 1];
+      setLines(lastUndoState);
+      setRedoStack(prev => prev.slice(0, -1));
+      
+      // Enviar comando de refazer para outros jogadores
+      socketService.getSocket().emit('redo', { roomCode });
+    }
   };
 
   // Adaptar ponto para o tamanho atual do canvas
@@ -608,10 +643,16 @@ function Sala() {
   // Função para lidar com dados de desenho do novo Canvas
   const handleCanvasDraw = (data: DrawingData) => {
     if (data.type === 'draw' && data.line && roomCode) {
+      const newUndoStack = [...undoStack, lines];
+      setUndoStack(newUndoStack);
+      setRedoStack([]);
+      
       const line = data.line;
       setLines(prev => [...prev, line]);
       socketService.getSocket().emit('draw-line', { roomCode, line });
     } else if (data.type === 'clear') {
+      setUndoStack([]);
+      setRedoStack([]);
       handleClearCanvas();
     }
   };
@@ -789,16 +830,59 @@ ${shareUrl}
       )}
       
       {/* Indicador de modo landscape */}
-      {isLandscapeMode && (
+      {isFullscreen && (
         <div className="fixed bottom-4 right-4 bg-green-600/90 text-white px-3 py-2 rounded-lg shadow-lg z-40 text-xs backdrop-blur-sm border border-green-400/50">
           📱 Modo Paisagem Ativo
         </div>
       )}
       
-      {/* Toast de notificação */}
+      {/* Transições de Round */}
+      {showRoundTransition && roundTransitionData && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-8 text-center max-w-md w-full text-gray-800 shadow-2xl transform animate-pulse">
+            {roundTransitionData.type === 'start' ? (
+              <>
+                <div className="text-6xl mb-4">🎨</div>
+                <h2 className="text-2xl font-bold mb-2 text-blue-600">
+                  Ronda {roundTransitionData.round} de {roundTransitionData.maxRounds}
+                </h2>
+                <p className="text-lg text-gray-600 mb-4">
+                  {roundTransitionData.drawer ? `${roundTransitionData.drawer} vai desenhar!` : 'Preparando...'}
+                </p>
+                <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+                  <div 
+                    className="bg-blue-500 h-2 rounded-full transition-all duration-1000"
+                    style={{ width: `${(roundTransitionData.round / roundTransitionData.maxRounds) * 100}%` }}
+                  ></div>
+                </div>
+                <p className="text-sm text-gray-500">Boa sorte! 🍀</p>
+              </>
+            ) : (
+              <>
+                <div className="text-6xl mb-4">✨</div>
+                <h2 className="text-2xl font-bold mb-2 text-purple-600">Fim da Ronda!</h2>
+                {roundTransitionData.word && (
+                  <div className="bg-purple-100 rounded-lg p-4 mb-4">
+                    <p className="text-sm text-purple-600 mb-1">A palavra era:</p>
+                    <p className="text-2xl font-bold text-purple-800">{roundTransitionData.word}</p>
+                  </div>
+                )}
+                <p className="text-lg text-gray-600">Preparando próxima ronda...</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Toast de notificação melhorado */}
       {showToast && (
-        <div className="fixed top-2 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-3 py-1 rounded-lg shadow-lg z-50 text-xs animate-fade-in-out">
-          {toastMessage}
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
+          <div className="bg-gradient-to-r from-green-500 to-blue-500 text-white px-4 py-2 rounded-lg shadow-lg border border-white/20 backdrop-blur-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🔔</span>
+              <span className="font-medium">{toastMessage}</span>
+            </div>
+          </div>
         </div>
       )}
       
@@ -1017,8 +1101,8 @@ ${shareUrl}
         </div>
       )}
       
-      <div className={`max-w-4xl mx-auto ${isLandscapeMode ? 'landscape-layout h-screen' : ''}`}>
-        <div className={`flex flex-col gap-1 mb-2 ${isLandscapeMode ? 'landscape-sidebar p-2' : ''}`}>
+      <div className={`max-w-4xl mx-auto ${isFullscreen ? 'landscape-layout h-screen' : ''}`}>
+        <div className={`flex flex-col gap-1 mb-2 ${isFullscreen ? 'landscape-sidebar p-2' : ''}`}>
           {/* Linha 1: Título e contador de jogadores */}
           <div className="flex justify-between items-center">
             <h1 className="text-base sm:text-lg font-bold">Sala: {roomCode}</h1>
@@ -1109,7 +1193,7 @@ ${shareUrl}
         </div>
 
         {/* Layout responsivo para todos os dispositivos */}
-        <div className={`flex flex-col gap-2 ${isLandscapeMode ? 'landscape-canvas overflow-y-auto' : ''}`}>
+        <div className={`flex flex-col gap-2 ${isFullscreen ? 'landscape-canvas overflow-y-auto' : ''}`}>
           {/* Lista de jogadores - otimizada para móvel */}
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-3 shadow-lg">
             <div className="flex justify-between items-center mb-3">
@@ -1177,7 +1261,7 @@ ${shareUrl}
                   
                   <div 
                     ref={canvasContainerRef} 
-                    className={`w-full mb-3 ${isHorizontalMode ? 'flex justify-center' : ''}`}
+                    className={`w-full mb-3 ${isFullscreen ? 'flex justify-center' : ''}`}
                   >
                     <Canvas
                       isDrawer={isDrawer}
@@ -1197,17 +1281,17 @@ ${shareUrl}
                       🗑️ Apagar Tudo
                     </button>
                     <button
-                      onClick={() => setIsHorizontalMode(!isHorizontalMode)}
+                      onClick={() => setIsFullscreen(!isFullscreen)}
                       className={`px-4 py-2 rounded-xl text-sm font-bold shadow-lg transition-all tap-feedback ${
-                        isHorizontalMode 
+                        isFullscreen 
                           ? 'bg-yellow-300 text-blue-900 hover:bg-yellow-400' 
                           : 'bg-white/20 text-white hover:bg-white/30'
                       }`}
-                      title={isHorizontalMode ? 'Modo Normal' : 'Modo Horizontal'}
+                      title={isFullscreen ? 'Modo Normal' : 'Modo Paisagem'}
                     >
-                      {isHorizontalMode ? '📱 Normal' : '📺 Horizontal'}
+                      {isFullscreen ? '📱 Normal' : '📺 Paisagem'}
                     </button>
-                    {isHorizontalMode && (
+                    {isFullscreen && (
                       <div className="text-sm text-yellow-200 flex items-center px-2 py-1 bg-blue-800/50 rounded-lg">
                         💡 Mais espaço para desenhar!
                       </div>
@@ -1316,37 +1400,217 @@ ${shareUrl}
           </div>
         </div>
 
-        {/* Cronómetro e informações - otimizado para móvel */}
+        {/* Interface de estado do jogo completamente renovada */}
         {isGameStarted && (
-          <div className="mt-3">
-            {/* Cronômetro em destaque */}
-            <div className="text-center mb-3">
-              <div className={`inline-block px-6 py-3 rounded-2xl shadow-xl transition-all ${
-                timer <= 10 && timer > 0
-                  ? 'bg-red-500 text-white animate-pulse border-2 border-red-300'
-                  : timer <= 30
-                  ? 'bg-orange-500 text-white border-2 border-orange-300'
-                  : 'bg-yellow-300 text-blue-900 border-2 border-yellow-400'
+          <div className="mt-4 space-y-4">
+            {/* Cronômetro moderno com animações e efeitos visuais */}
+            <div className="text-center">
+              <div className={`inline-block relative px-8 py-4 rounded-3xl shadow-2xl transition-all duration-500 transform ${
+                timer <= 5 && timer > 0
+                  ? 'bg-gradient-to-r from-red-500 via-red-600 to-red-700 text-white animate-pulse scale-110 border-4 border-red-300 shadow-red-500/50'
+                  : timer <= 10
+                  ? 'bg-gradient-to-r from-orange-500 via-orange-600 to-red-500 text-white border-3 border-orange-300 shadow-orange-500/40 scale-105'
+                  : timer <= 20
+                  ? 'bg-gradient-to-r from-yellow-400 via-yellow-500 to-orange-400 text-blue-900 border-2 border-yellow-300 shadow-yellow-500/30'
+                  : 'bg-gradient-to-r from-green-400 via-green-500 to-blue-500 text-white border-2 border-green-300 shadow-green-500/30'
               }`}>
-                <div className="text-2xl font-extrabold">
-                  ⏱️ {timer}s
+                {/* Efeito de pulso para tempo crítico */}
+                {timer <= 5 && timer > 0 && (
+                  <div className="absolute inset-0 rounded-3xl bg-red-500 animate-ping opacity-20"></div>
+                )}
+                
+                <div className="relative flex items-center gap-3">
+                  <span className={`text-4xl ${timer <= 10 ? 'animate-bounce' : ''}`}>
+                    {timer <= 5 ? '⚠️' : timer <= 10 ? '⏰' : '⏱️'}
+                  </span>
+                  <div className="text-center">
+                    <div className="text-4xl font-black tracking-wider">{timer}s</div>
+                    <div className="text-sm font-semibold opacity-90">
+                      {timer > 30 ? '🌟 Muito tempo' : 
+                       timer > 15 ? '⚡ Tempo moderado' : 
+                       timer > 5 ? '🔥 Pouco tempo!' : 
+                       '💥 CRÍTICO!'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Barra de progresso animada */}
+              <div className="max-w-lg mx-auto mt-3">
+                <div className="relative w-full bg-gray-200/30 rounded-full h-3 overflow-hidden shadow-inner">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                      timer <= 5 ? 'bg-gradient-to-r from-red-500 to-red-600 animate-pulse' : 
+                      timer <= 10 ? 'bg-gradient-to-r from-orange-500 to-red-500' :
+                      timer <= 20 ? 'bg-gradient-to-r from-yellow-400 to-orange-500' :
+                      'bg-gradient-to-r from-green-400 to-blue-500'
+                    }`}
+                    style={{ 
+                      width: `${Math.max(0, (timer / 60) * 100)}%`,
+                      boxShadow: timer <= 10 ? '0 0 10px rgba(255, 0, 0, 0.5)' : 'none'
+                    }}
+                  >
+                    {/* Efeito de brilho na barra */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer"></div>
+                  </div>
+                  
+                  {/* Marcos de tempo */}
+                  <div className="absolute inset-0 flex justify-between items-center px-2">
+                    {[0, 15, 30, 45, 60].map(mark => (
+                      <div 
+                        key={mark}
+                        className="w-0.5 h-full bg-white/50"
+                        style={{ left: `${(mark / 60) * 100}%` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="flex justify-between text-xs text-white/70 mt-1">
+                  <span>0s</span>
+                  <span>15s</span>
+                  <span>30s</span>
+                  <span>45s</span>
+                  <span>60s</span>
                 </div>
               </div>
             </div>
             
-            {/* Área de dicas melhorada */}
+            {/* Sistema de dicas completamente renovado */}
             {hints.length > 0 && (
-              <div className="bg-gradient-to-r from-blue-800/70 to-purple-800/70 backdrop-blur-sm rounded-xl p-3 mx-auto max-w-md border border-blue-600/50 shadow-lg">
-                <div className="text-center">
-                  <div className="text-yellow-200 text-sm font-semibold mb-1">
-                    💡 Dica:
+              <div className="max-w-3xl mx-auto">
+                <div className="bg-gradient-to-br from-indigo-600/90 via-purple-600/80 to-pink-600/70 backdrop-blur-lg rounded-2xl p-5 border border-white/20 shadow-2xl">
+                  {/* Cabeçalho das dicas */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="text-3xl animate-bounce">💡</div>
+                      <h3 className="text-white font-bold text-xl">Dicas Disponíveis</h3>
+                    </div>
+                    <div className="bg-white/20 rounded-full px-3 py-1">
+                      <span className="text-white font-semibold text-sm">{hints.length} dica{hints.length > 1 ? 's' : ''}</span>
+                    </div>
                   </div>
-                  <div className="text-white text-base font-medium">
-                    {hints.slice(-1)[0]?.hint}
+                  
+                  {/* Grid de dicas com animações */}
+                  <div className="grid gap-3">
+                    {hints.slice(-3).map((hint, index) => (
+                      <div 
+                        key={index} 
+                        className="group bg-white/15 hover:bg-white/25 rounded-xl p-4 border border-white/20 transform hover:scale-105 transition-all duration-300 cursor-pointer"
+                        style={{ 
+                          animationDelay: `${index * 0.1}s`,
+                          animation: 'fadeInUp 0.5s ease-out forwards'
+                        }}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-lg ${
+                              hint.type === 'letters' ? 'bg-blue-500' :
+                              hint.type === 'first-letter' ? 'bg-green-500' :
+                              'bg-purple-500'
+                            }`}>
+                              {hint.type === 'letters' ? '📏' : 
+                               hint.type === 'first-letter' ? '🅰️' : '🔤'}
+                            </div>
+                          </div>
+                          
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-yellow-300 font-semibold text-sm">
+                                Dica {hints.indexOf(hint) + 1}
+                              </span>
+                              <span className="text-white/60 text-xs">
+                                {hint.type === 'letters' ? 'Quantidade de letras' :
+                                 hint.type === 'first-letter' ? 'Primeira letra' :
+                                 'Letra adicional'}
+                              </span>
+                            </div>
+                            
+                            <p className="text-white text-lg font-medium leading-relaxed">
+                              {hint.hint}
+                            </p>
+                            
+                            {/* Timestamp da dica */}
+                            <div className="text-white/50 text-xs mt-2">
+                              {new Date(hint.timestamp).toLocaleTimeString('pt-PT', { 
+                                hour: '2-digit', 
+                                minute: '2-digit',
+                                second: '2-digit'
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                  
+                  {/* Histórico de dicas */}
+                  {hints.length > 3 && (
+                    <div className="text-center mt-4 pt-4 border-t border-white/20">
+                      <button 
+                        onClick={() => setShowHistory(true)}
+                        className="text-yellow-300 hover:text-yellow-200 transition-colors font-medium text-sm flex items-center gap-2 mx-auto group"
+                      >
+                        <span>Ver todas as {hints.length} dicas</span>
+                        <span className="group-hover:translate-x-1 transition-transform">→</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
+
+            {/* Painel de estado do jogo */}
+            <div className="max-w-2xl mx-auto">
+              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 shadow-lg">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                  {/* Estado da fase */}
+                  <div className="bg-white/10 rounded-lg p-3">
+                    <div className="text-2xl mb-1">
+                      {gameState.phase === 'waiting' ? '⏳' :
+                       gameState.phase === 'countdown' ? '⏱️' :
+                       gameState.phase === 'drawing' ? '🎨' :
+                       gameState.phase === 'revealing' ? '✨' : '🏁'}
+                    </div>
+                    <p className="text-white font-medium text-sm">
+                      {gameState.phase === 'waiting' ? 'Aguardando' :
+                       gameState.phase === 'countdown' ? 'Começando' :
+                       gameState.phase === 'drawing' ? 'Desenhando' :
+                       gameState.phase === 'revealing' ? 'Descoberto' : 'Finalizado'}
+                    </p>
+                  </div>
+
+                  {/* Progresso da ronda */}
+                  <div className="bg-white/10 rounded-lg p-3">
+                    <div className="text-2xl mb-1">📊</div>
+                    <p className="text-white font-medium text-sm">
+                      Ronda {round}/{maxRounds}
+                    </p>
+                  </div>
+
+                  {/* Número de jogadores */}
+                  <div className="bg-white/10 rounded-lg p-3">
+                    <div className="text-2xl mb-1">👥</div>
+                    <p className="text-white font-medium text-sm">
+                      {players.length} jogador{players.length > 1 ? 'es' : ''}
+                    </p>
+                  </div>
+
+                  {/* Configurações rápidas */}
+                  <div className="bg-white/10 rounded-lg p-3">
+                    <button
+                      onClick={() => setSoundEnabled(!soundEnabled)}
+                      className="text-2xl mb-1 hover:scale-110 transition-transform"
+                    >
+                      {soundEnabled ? '🔊' : '🔇'}
+                    </button>
+                    <p className="text-white font-medium text-sm">
+                      Som {soundEnabled ? 'ON' : 'OFF'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
