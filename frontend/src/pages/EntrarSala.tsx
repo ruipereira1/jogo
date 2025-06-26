@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import socketService from '../services/socket';
 import { useViewport } from '../hooks/useViewport';
@@ -12,15 +12,23 @@ function EntrarSala() {
   const [showQrScanner, setShowQrScanner] = useState(false);
   const [qrScannerError, setQrScannerError] = useState('');
   const navigate = useNavigate();
-  const { code } = useParams<{ code: string }>();
+  const { roomCode: urlRoomCode } = useParams<{ roomCode: string }>();
+  const nomeInputRef = useRef<HTMLInputElement>(null);
 
   // Configurar viewport para mobile
   useViewport();
 
   useEffect(() => {
     // Se vier código pela URL, preencher automaticamente
-    if (code) {
-      setRoomCode(code.toUpperCase());
+    if (urlRoomCode) {
+      setRoomCode(urlRoomCode.toUpperCase());
+      setSuccessMessage('Código da sala carregado automaticamente!');
+      setTimeout(() => setSuccessMessage(''), 4000);
+      
+      // Focar no campo nome após um pequeno delay para melhor UX
+      setTimeout(() => {
+        nomeInputRef.current?.focus();
+      }, 500);
     }
 
     // Conectar ao servidor Socket.IO
@@ -32,7 +40,7 @@ function EntrarSala() {
         socketService.disconnect();
       }
     };
-  }, [code]);
+  }, [urlRoomCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,31 +77,49 @@ function EntrarSala() {
     try {
       const text = await navigator.clipboard.readText();
       
-      // Primeiro, tentar extrair código de URL compartilhada
-      const urlMatch = text.match(/\/entrar-sala\/([A-Z0-9]{6})/i);
-      if (urlMatch) {
-        setRoomCode(urlMatch[1].toUpperCase());
-        setSuccessMessage('Código da sala detectado automaticamente!');
-        setTimeout(() => setSuccessMessage(''), 3000);
-        return;
+      // Tentar extrair código de diferentes formatos de URL
+      const urlPatterns = [
+        /\/entrar-sala\/([A-Z0-9]{6})/i,           // /entrar-sala/ABC123
+        /\/sala\/([A-Z0-9]{6})/i,                  // /sala/ABC123
+        /[?&]codigo=([A-Z0-9]{6})/i,               // ?codigo=ABC123
+        /[?&]roomCode=([A-Z0-9]{6})/i,             // ?roomCode=ABC123
+        /[?&]room=([A-Z0-9]{6})/i,                 // ?room=ABC123
+      ];
+      
+      for (const pattern of urlPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+          setRoomCode(match[1].toUpperCase());
+          setSuccessMessage('🔗 Código da sala detectado do link!');
+          setTimeout(() => setSuccessMessage(''), 4000);
+          return;
+        }
       }
       
-      // Se não for URL, tentar extrair código de 6 dígitos do texto colado
-      const codeMatch = text.match(/[A-Z0-9]{6}/);
+      // Se não for URL, tentar extrair código de 6 caracteres alfanuméricos
+      const codeMatch = text.match(/\b[A-Z0-9]{6}\b/i);
       if (codeMatch) {
-        setRoomCode(codeMatch[0]);
+        setRoomCode(codeMatch[0].toUpperCase());
+        setSuccessMessage('📋 Código da sala detectado!');
+        setTimeout(() => setSuccessMessage(''), 3000);
       } else {
-        // Como último recurso, pegar os primeiros 6 caracteres
+        // Como último recurso, pegar os primeiros 6 caracteres válidos
         const cleanText = text.replace(/[^A-Z0-9]/gi, '').slice(0, 6).toUpperCase();
         if (cleanText.length > 0) {
           setRoomCode(cleanText);
+          setSuccessMessage('✂️ Texto processado para código!');
+          setTimeout(() => setSuccessMessage(''), 3000);
+        } else {
+          setError('Nenhum código válido encontrado no texto colado');
+          setTimeout(() => setError(''), 3000);
         }
       }
     } catch (err) {
       if (import.meta.env.DEV) {
         console.log('Não foi possível colar do clipboard');
       }
-      // Silenciosamente falhar se não conseguir acessar clipboard
+      setError('Não foi possível acessar a área de transferência');
+      setTimeout(() => setError(''), 3000);
     }
   };
 
@@ -305,6 +331,7 @@ function EntrarSala() {
               👤 Seu nome
             </label>
             <input
+              ref={nomeInputRef}
               className="w-full ios-button mobile:min-h-touch p-3 rounded-xl text-blue-900 mobile:text-base-mobile sm:text-base placeholder-blue-400 focus:outline-none focus:ring-2 focus:ring-yellow-300 transition"
               type="text"
               placeholder="Digite seu nome..."
@@ -428,12 +455,20 @@ function EntrarSala() {
         </div>
       </div>
 
-      {/* Demo Code for Testing */}
-      {code && (
+      {/* Código detectado da URL */}
+      {urlRoomCode && (
         <div className="mt-4 w-full max-w-sm">
           <div className="bg-green-800/30 backdrop-blur-sm rounded-xl p-3 border border-green-600/50">
-            <p className="text-center mobile:text-xs-mobile sm:text-sm text-green-200">
-              ✅ Código detectado: <span className="font-mono font-bold">{code}</span>
+            <div className="text-center mb-3">
+              <p className="mobile:text-sm-mobile sm:text-base text-green-200 font-medium">
+                ✨ Entrada Automática
+              </p>
+              <p className="text-center mobile:text-xs-mobile sm:text-sm text-green-300">
+                Código detectado: <span className="font-mono font-bold text-green-100">{urlRoomCode}</span>
+              </p>
+            </div>
+            <p className="text-center mobile:text-xs-mobile sm:text-sm text-green-200 mb-2">
+              🎯 Basta inserir seu nome e clicar em "Entrar na Sala"!
             </p>
           </div>
         </div>

@@ -650,13 +650,16 @@ function Sala() {
       
       const shareText = `🎨 Venha jogar ArteRápida comigo! 
 
-Clique no link e será automático:
+✨ ENTRADA AUTOMÁTICA:
 ${shareUrl}
 
-Ou cole este link no campo "Código da sala" no jogo:
-${shareUrl}
+📋 Ou use o código: ${roomCode}
 
-Sala: ${roomCode}`;
+🎯 Como jogar:
+1. Clique no link acima (entrada automática)
+2. Ou cole o código no jogo
+3. Divirta-se desenhando e adivinhando!`;
+      
       const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareText)}`;
       
       const newWindow = window.open(whatsappUrl, '_blank');
@@ -889,7 +892,7 @@ Sala: ${roomCode}`;
             
             <div className="bg-blue-50 p-2 rounded-lg mb-3">
               <p className="text-blue-800 text-xs text-center">
-                💡 <strong>Dica:</strong> O link direto carrega automaticamente o código da sala!
+                ✨ <strong>ENTRADA AUTOMÁTICA:</strong> Quem clicar no link entra direto na sala sem precisar digitar código!
               </p>
             </div>
             
