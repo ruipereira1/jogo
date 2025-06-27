@@ -12,7 +12,7 @@ declare global {
 }
 
 // URLs de produção e desenvolvimento
-const PROD_SERVER_URL = 'https://jogo-0vuq.onrender.com';
+const PROD_SERVER_URL = 'https://jogo-0vug.onrender.com';
 const DEV_SERVER_URL = 'http://localhost:4000';
 
 // Usar URL de produção ou desenvolvimento baseado no ambiente
@@ -267,15 +267,15 @@ class SocketService {
 
   joinRoom(userName: string, roomCode: string) {
     const socket = this.getSocket();
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<JoinRoomResponse>((resolve, reject) => {
       socket.emit('join-room', { userName, roomCode }, (response: JoinRoomResponse) => {
         if (response.success) {
           this.setUser({ id: socket.id ?? '', name: userName });
           // Salvar código da sala para reconexão
           localStorage.setItem('currentRoomCode', roomCode);
-          resolve();
+          resolve(response);
         } else {
-          reject(response.error || 'Erro ao entrar na sala');
+          reject(response);
         }
       });
     });
