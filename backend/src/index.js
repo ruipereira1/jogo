@@ -684,40 +684,50 @@ io.on('connection', (socket) => {
   // Entrar em sala
   socket.on('join-room', ({ userName, roomCode }, callback) => {
     try {
+      // Verificar se callback foi fornecido
+      const hasCallback = typeof callback === 'function';
+      
       // Validações de entrada
       if (!userName || typeof userName !== 'string') {
-        return callback({ success: false, error: 'Nome de utilizador inválido' });
+        if (hasCallback) return callback({ success: false, error: 'Nome de utilizador inválido' });
+        return;
       }
 
       if (!roomCode || typeof roomCode !== 'string') {
-        return callback({ success: false, error: 'Código da sala inválido' });
+        if (hasCallback) return callback({ success: false, error: 'Código da sala inválido' });
+        return;
       }
 
       const trimmedUserName = userName.trim();
       if (trimmedUserName.length < 2 || trimmedUserName.length > 20) {
-        return callback({ success: false, error: 'Nome deve ter entre 2 e 20 caracteres' });
+        if (hasCallback) return callback({ success: false, error: 'Nome deve ter entre 2 e 20 caracteres' });
+        return;
       }
 
       const trimmedRoomCode = roomCode.trim().toUpperCase();
       if (trimmedRoomCode.length !== 6) {
-        return callback({ success: false, error: 'Código da sala deve ter 6 caracteres' });
+        if (hasCallback) return callback({ success: false, error: 'Código da sala deve ter 6 caracteres' });
+        return;
       }
 
       const room = rooms.get(trimmedRoomCode);
       
       if (!room) {
         io.emit('room-not-found', { roomCode: trimmedRoomCode });
-        return callback({ success: false, error: 'Sala não encontrada' });
+        if (hasCallback) return callback({ success: false, error: 'Sala não encontrada' });
+        return;
       }
 
       if (room.status !== 'waiting') {
-        return callback({ success: false, error: 'Jogo já iniciado' });
+        if (hasCallback) return callback({ success: false, error: 'Jogo já iniciado' });
+        return;
       }
 
       // Verificar se já existe um jogador com o mesmo nome (exceto se for reconexão)
       const existingActivePlayer = room.players.find(p => p.name === trimmedUserName && !p.isTemporarilyDisconnected);
       if (existingActivePlayer) {
-        return callback({ success: false, error: 'Já existe um jogador com esse nome na sala' });
+        if (hasCallback) return callback({ success: false, error: 'Já existe um jogador com esse nome na sala' });
+        return;
       }
 
       // Se a sala estava vazia e marcada para deleção, cancelar
@@ -790,20 +800,24 @@ io.on('connection', (socket) => {
       socket.data.roomCode = trimmedRoomCode;
       socket.data.userName = trimmedUserName;
 
-      callback({ success: true });
+      if (hasCallback) callback({ success: true });
     } catch (error) {
       console.error('Erro ao entrar na sala:', error);
-      callback({ success: false, error: 'Erro ao entrar na sala' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro ao entrar na sala' });
     }
   });
 
   // Reconectar à sala (para casos especiais de reconexão automática)
   socket.on('reconnect-to-room', ({ userName, roomCode }, callback) => {
     try {
+      // Verificar se callback foi fornecido
+      const hasCallback = typeof callback === 'function';
+      
       const room = rooms.get(roomCode);
       
       if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
+        if (hasCallback) return callback({ success: false, error: 'Sala não encontrada' });
+        return;
       }
 
       // Procurar jogador desconectado temporariamente
@@ -839,7 +853,7 @@ io.on('connection', (socket) => {
           players: room.players
         });
         
-        callback({ 
+        if (hasCallback) callback({ 
           success: true, 
           gameState: {
             status: room.status,
@@ -851,11 +865,11 @@ io.on('connection', (socket) => {
           }
         });
       } else {
-        callback({ success: false, error: 'Jogador não encontrado para reconexão' });
+        if (hasCallback) callback({ success: false, error: 'Jogador não encontrado para reconexão' });
       }
     } catch (error) {
       console.error('Erro ao reconectar à sala:', error);
-      callback({ success: false, error: 'Erro ao reconectar à sala' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro ao reconectar à sala' });
     }
   });
 
@@ -1127,14 +1141,23 @@ io.on('connection', (socket) => {
 
   // Obter histórico de palavras
   socket.on('get-word-history', ({ roomCode }, callback) => {
-    const room = rooms.get(roomCode);
-    if (!room) {
-      return callback({ success: false, error: 'Sala não encontrada' });
+    try {
+      const hasCallback = typeof callback === 'function';
+      
+      const room = rooms.get(roomCode);
+      if (!room) {
+        if (hasCallback) return callback({ success: false, error: 'Sala não encontrada' });
+        return;
+      }
+      
+      if (hasCallback) callback({ 
+        success: true, 
+        history: room.wordHistory || [] 
+      });
+    } catch (error) {
+      console.error('Erro ao obter histórico:', error);
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro interno' });
     }
-    callback({ 
-      success: true, 
-      history: room.wordHistory || [] 
-    });
   });
 
   // Limpar o canvas
@@ -1168,17 +1191,20 @@ io.on('connection', (socket) => {
   // Criar sala com configurações avançadas
   socket.on('create-room-advanced', async (data, callback) => {
     try {
+      const hasCallback = typeof callback === 'function';
       const { userName, ...roomData } = data;
       
       // Rate limiting
       const rateLimitCheck = await rateLimitManager.checkSocketRateLimit(socket, 'createRoom');
       if (!rateLimitCheck.allowed) {
-        return callback({ success: false, error: rateLimitCheck.message });
+        if (hasCallback) return callback({ success: false, error: rateLimitCheck.message });
+        return;
       }
 
       // Validações
       if (!userName || typeof userName !== 'string') {
-        return callback({ success: false, error: 'Nome de utilizador inválido' });
+        if (hasCallback) return callback({ success: false, error: 'Nome de utilizador inválido' });
+        return;
       }
 
       const trimmedUserName = userName.trim();
@@ -1243,31 +1269,36 @@ io.on('connection', (socket) => {
       socket.data.userName = trimmedUserName;
 
       console.log(`Sala avançada ${room.id} criada por ${trimmedUserName}`);
-      callback({ success: true, roomCode: room.id, room });
+      if (hasCallback) callback({ success: true, roomCode: room.id, room });
       
     } catch (error) {
       console.error('Erro ao criar sala avançada:', error);
-      callback({ success: false, error: 'Erro interno ao criar sala' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro interno ao criar sala' });
     }
   });
 
   // Entrar em sala privada (com senha)
   socket.on('join-private-room', async ({ userName, roomCode, password }, callback) => {
     try {
+      const hasCallback = typeof callback === 'function';
+      
       if (!userName || !roomCode) {
-        return callback({ success: false, error: 'Dados incompletos' });
+        if (hasCallback) return callback({ success: false, error: 'Dados incompletos' });
+        return;
       }
 
       const room = rooms.get(roomCode.toUpperCase());
       
       if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
+        if (hasCallback) return callback({ success: false, error: 'Sala não encontrada' });
+        return;
       }
 
       const roomManagerData = roomManager.rooms.get(roomCode.toUpperCase());
       
       if (roomManagerData?.isPrivate && roomManagerData.password !== password) {
-        return callback({ success: false, error: 'Senha incorreta' });
+        if (hasCallback) return callback({ success: false, error: 'Senha incorreta' });
+        return;
       }
 
       // Usar lógica existente de join-room
@@ -1275,23 +1306,27 @@ io.on('connection', (socket) => {
 
     } catch (error) {
       console.error('Erro ao entrar em sala privada:', error);
-      callback({ success: false, error: 'Erro interno' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro interno' });
     }
   });
 
   // Atualizar configurações da sala (host only)
   socket.on('update-room-settings', ({ roomCode, settings }, callback) => {
     try {
+      const hasCallback = typeof callback === 'function';
+      
       const room = rooms.get(roomCode);
       
       if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
+        if (hasCallback) return callback({ success: false, error: 'Sala não encontrada' });
+        return;
       }
 
       const player = room.players.find(p => p.id === socket.id);
       
       if (!player || !player.isHost) {
-        return callback({ success: false, error: 'Apenas o host pode alterar configurações' });
+        if (hasCallback) return callback({ success: false, error: 'Apenas o host pode alterar configurações' });
+        return;
       }
 
       // Atualizar no RoomManager
@@ -1303,33 +1338,38 @@ io.on('connection', (socket) => {
       // Notificar jogadores
       io.to(roomCode).emit('room-settings-updated', { settings });
       
-      callback({ success: true });
+      if (hasCallback) callback({ success: true });
       
     } catch (error) {
       console.error('Erro ao atualizar configurações:', error);
-      callback({ success: false, error: 'Erro interno' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro interno' });
     }
   });
 
   // Banir jogador (host only)
   socket.on('ban-player', ({ roomCode, playerId, reason }, callback) => {
     try {
+      const hasCallback = typeof callback === 'function';
+      
       const room = rooms.get(roomCode);
       
       if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
+        if (hasCallback) return callback({ success: false, error: 'Sala não encontrada' });
+        return;
       }
 
       const host = room.players.find(p => p.id === socket.id);
       
       if (!host || !host.isHost) {
-        return callback({ success: false, error: 'Apenas o host pode banir jogadores' });
+        if (hasCallback) return callback({ success: false, error: 'Apenas o host pode banir jogadores' });
+        return;
       }
 
       const targetPlayer = room.players.find(p => p.id === playerId);
       
       if (!targetPlayer) {
-        return callback({ success: false, error: 'Jogador não encontrado' });
+        if (hasCallback) return callback({ success: false, error: 'Jogador não encontrado' });
+        return;
       }
 
       // Usar sistema de moderação
@@ -1351,31 +1391,36 @@ io.on('connection', (socket) => {
         players: room.players
       });
 
-      callback({ success: true });
+      if (hasCallback) callback({ success: true });
       
     } catch (error) {
       console.error('Erro ao banir jogador:', error);
-      callback({ success: false, error: 'Erro interno' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro interno' });
     }
   });
 
   // Adicionar palavra personalizada
   socket.on('add-custom-word', ({ roomCode, word }, callback) => {
     try {
+      const hasCallback = typeof callback === 'function';
+      
       const room = rooms.get(roomCode);
       
       if (!room) {
-        return callback({ success: false, error: 'Sala não encontrada' });
+        if (hasCallback) return callback({ success: false, error: 'Sala não encontrada' });
+        return;
       }
 
       const player = room.players.find(p => p.id === socket.id);
       
       if (!player || !player.isHost) {
-        return callback({ success: false, error: 'Apenas o host pode adicionar palavras' });
+        if (hasCallback) return callback({ success: false, error: 'Apenas o host pode adicionar palavras' });
+        return;
       }
 
       if (!word || typeof word !== 'string' || word.trim().length < 2) {
-        return callback({ success: false, error: 'Palavra inválida' });
+        if (hasCallback) return callback({ success: false, error: 'Palavra inválida' });
+        return;
       }
 
       const trimmedWord = word.trim().toLowerCase();
@@ -1384,7 +1429,8 @@ io.on('connection', (socket) => {
       const moderation = moderationSystem.moderateMessage(socket.id, player.name, trimmedWord);
       
       if (!moderation.isAllowed) {
-        return callback({ success: false, error: 'Palavra não permitida' });
+        if (hasCallback) return callback({ success: false, error: 'Palavra não permitida' });
+        return;
       }
 
       const roomManagerData = roomManager.rooms.get(roomCode);
@@ -1394,7 +1440,8 @@ io.on('connection', (socket) => {
         }
         
         if (roomManagerData.customWords.length >= 100) {
-          return callback({ success: false, error: 'Máximo de 100 palavras personalizadas' });
+          if (hasCallback) return callback({ success: false, error: 'Máximo de 100 palavras personalizadas' });
+          return;
         }
         
         if (!roomManagerData.customWords.includes(trimmedWord)) {
@@ -1402,22 +1449,24 @@ io.on('connection', (socket) => {
         }
       }
 
-      callback({ success: true });
+      if (hasCallback) callback({ success: true });
       
     } catch (error) {
       console.error('Erro ao adicionar palavra personalizada:', error);
-      callback({ success: false, error: 'Erro interno' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro interno' });
     }
   });
 
   // Obter estatísticas da sala
   socket.on('get-room-stats', ({ roomCode }, callback) => {
     try {
+      const hasCallback = typeof callback === 'function';
+      
       const stats = roomManager.getRoomStats(roomCode);
-      callback({ success: true, stats });
+      if (hasCallback) callback({ success: true, stats });
     } catch (error) {
       console.error('Erro ao obter estatísticas:', error);
-      callback({ success: false, error: 'Erro interno' });
+      if (typeof callback === 'function') callback({ success: false, error: 'Erro interno' });
     }
   });
 });

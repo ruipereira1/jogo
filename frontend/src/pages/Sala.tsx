@@ -432,7 +432,19 @@ function Sala() {
     });
 
     // Entrar na sala
-    socket.emit('join-room', { roomCode, userName: user.name });
+    socketService.joinRoom(user.name, roomCode)
+      .then(response => {
+        if (response.success) {
+          console.log('Entrou na sala com sucesso');
+        } else {
+          console.error('Erro ao entrar na sala:', response.error);
+          navigate('/', { state: { error: response.error } });
+        }
+      })
+      .catch(error => {
+        console.error('Erro ao entrar na sala:', error);
+        navigate('/', { state: { error: 'Erro de conexão' } });
+      });
 
     return () => {
       socket.off('player-joined');
