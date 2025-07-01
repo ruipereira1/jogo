@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const compression = require('compression');
 const helmet = require('helmet');
+const { Server } = require('socket.io');
 
 // Importar sistemas melhorados
 const { WORDS_FACIL, WORDS_MEDIO, WORDS_DIFICIL, getRandomWord } = require('./words');
@@ -66,20 +67,19 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with']
 };
 
-const io = socketIo(server, {
-  cors: corsOptions,
-  // Configurações para melhorar a conexão
-  pingTimeout: 60000, // 60 segundos
-  pingInterval: 25000, // 25 segundos
-  transports: ['websocket', 'polling'], // Permite fallback para polling se websocket falhar
-  allowEIO3: true, // Compatibilidade com versões anteriores
-  // Configurações de reconexão
-  connectionStateRecovery: {
-    // Duração máxima para tentar recuperar a conexão
-    maxDisconnectionDuration: 2 * 60 * 1000, // 2 minutos
-    // Permitir recuperação se o cliente se desconectar e reconectar rapidamente
-    skipMiddlewares: true,
-  }
+// Unificar a configuração de CORS para Express e Socket.io
+const socketCorsConfig = {
+  origin: [
+    'https://desenharapido.netlify.app',
+    'https://jogo-0vuq.onrender.com', // Adicionar a própria URL do Render
+    'http://localhost:5173'
+  ],
+  methods: ["GET", "POST"],
+  credentials: true
+};
+
+const io = new Server(server, {
+  cors: socketCorsConfig
 });
 
 // Middleware
