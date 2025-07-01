@@ -163,7 +163,6 @@ const AchievementSystem: React.FC<AchievementSystemProps> = ({
   const progressToNextLevel = useMemo(() => {
     if (currentLevel.level === levels.length) return 100; // Nível máximo
     
-    const nextLevel = levels[currentLevel.level];
     const progressInCurrentLevel = totalXP - currentLevel.minXP;
     const totalXPInCurrentLevel = currentLevel.maxXP - currentLevel.minXP;
     

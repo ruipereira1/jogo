@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import socketService from '../services/socket';
 import Canvas, { DrawingLine, DrawingData } from '../components/Canvas';
 import GameStats from '../components/GameStats';
 import AchievementSystem from '../components/AchievementSystem';
-import DrawingTools, { DrawingTool } from '../components/DrawingTools';
 
 interface Player {
   id: string;
@@ -39,7 +38,6 @@ function Sala() {
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 500, height: 350 });
   const [lines, setLines] = useState<DrawingLine[]>([]);
-  const [drawing, setDrawing] = useState(false);
   const [guess, setGuess] = useState('');
   const [guesses, setGuesses] = useState<{ name: string; text: string; correct: boolean; timestamp: number }[]>([]);
   const [guessedCorrectly, setGuessedCorrectly] = useState(false);
@@ -61,28 +59,20 @@ function Sala() {
   
   // Estados melhorados para a nova interface
   const [hints, setHints] = useState<{ hint: string; type: string; timestamp: number }[]>([]);
-  const [revealedWord, setRevealedWord] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<{ name: string; message: string; timestamp: number }[]>([]);
+  const [, setRevealedWord] = useState<string | null>(null);
+  const [chatMessages] = useState<{ name: string; message: string; timestamp: number }[]>([]);
   const [chatMessage, setChatMessage] = useState('');
   const [showChat, setShowChat] = useState(false);
   const [wordHistory, setWordHistory] = useState<WordHistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [isReconnecting, setIsReconnecting] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
+  const [connectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('connected');
   const [gameState, setGameState] = useState<GameState>({ phase: 'waiting' });
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   
   // Estados para ferramentas de desenho avançadas
-  const [currentTool, setCurrentTool] = useState<DrawingTool>({
-    type: 'pen',
-    color: '#000000',
-    size: 3,
-    opacity: 1
-  });
   const [undoStack, setUndoStack] = useState<DrawingLine[][]>([]);
-  const [redoStack, setRedoStack] = useState<DrawingLine[][]>([]);
+  const [, setRedoStack] = useState<DrawingLine[][]>([]);
   
   // Estados para conquistas e estatísticas avançadas
   const [playerStats, setPlayerStats] = useState({
@@ -98,8 +88,7 @@ function Sala() {
     artisticGames: 0
   });
   const [currentStreak, setCurrentStreak] = useState(0);
-  const [showAchievements, setShowAchievements] = useState(false);
-  const [activeTab, setActiveTab] = useState<'game' | 'stats' | 'achievements'>('game');
+  const [activeTab] = useState<'game' | 'stats' | 'achievements'>('game');
   const [showRoundTransition, setShowRoundTransition] = useState(false);
   const [roundTransitionData, setRoundTransitionData] = useState<{
     type: 'start' | 'end';
@@ -114,14 +103,14 @@ function Sala() {
   const timeoutRefs = useRef<number[]>([]);
 
   // Função auxiliar para adicionar timeout com limpeza automática
-  const addTimeout = (callback: () => void, delay: number) => {
+  const addTimeout = useCallback((callback: () => void, delay: number) => {
     const timeoutId = window.setTimeout(() => {
       callback();
       timeoutRefs.current = timeoutRefs.current.filter(id => id !== timeoutId);
     }, delay);
     timeoutRefs.current.push(timeoutId);
     return timeoutId;
-  };
+  }, []);
 
   // Função para limpar todos os timeouts
   const clearAllTimeouts = () => {
@@ -130,7 +119,7 @@ function Sala() {
   };
 
   // Função para calcular o tamanho do canvas com base no container
-  const updateCanvasSize = () => {
+  const updateCanvasSize = useCallback(() => {
     if (canvasContainerRef.current) {
       const containerWidth = canvasContainerRef.current.clientWidth;
       const screenWidth = window.innerWidth;
@@ -153,14 +142,14 @@ function Sala() {
       
       setCanvasSize({ width: newWidth, height: newHeight });
     }
-  };
+  }, [isFullscreen]);
 
   // Sons para feedback
-  const playSound = (type: 'correct' | 'wrong' | 'hint' | 'timer' | 'round-start' | 'round-end') => {
+  const playSound = useCallback((type: 'correct' | 'wrong' | 'hint' | 'timer' | 'round-start' | 'round-end') => {
     if (!soundEnabled) return;
     
     // Criar um tom simples usando Web Audio API
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
     
@@ -203,10 +192,10 @@ function Sala() {
     
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + duration);
-  };
+  }, [soundEnabled]);
 
   // Função para mostrar transição de round
-  const showRoundTransitionAnimation = (data: typeof roundTransitionData) => {
+  const showRoundTransitionAnimation = useCallback((data: typeof roundTransitionData) => {
     setRoundTransitionData(data);
     setShowRoundTransition(true);
     
@@ -214,19 +203,19 @@ function Sala() {
       setShowRoundTransition(false);
       setRoundTransitionData(null);
     }, 3000);
-  };
+  }, [addTimeout]);
 
   // Atualizar o tamanho do canvas quando a janela for redimensionada
   useEffect(() => {
     updateCanvasSize();
     window.addEventListener('resize', updateCanvasSize);
     return () => window.removeEventListener('resize', updateCanvasSize);
-  }, []);
+  }, [updateCanvasSize]);
 
   // Atualizar canvas quando o modo fullscreen mudar
   useEffect(() => {
     updateCanvasSize();
-  }, [isFullscreen]);
+  }, [isFullscreen, updateCanvasSize]);
 
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -433,17 +422,13 @@ function Sala() {
 
     // Entrar na sala
     socketService.joinRoom(user.name, roomCode)
-      .then(response => {
-        if (response.success) {
-          console.log('Entrou na sala com sucesso');
-        } else {
-          console.error('Erro ao entrar na sala:', response.error);
-          navigate('/', { state: { error: response.error } });
-        }
+      .then(() => {
+        console.log('Entrou na sala com sucesso');
       })
       .catch(error => {
         console.error('Erro ao entrar na sala:', error);
-        navigate('/', { state: { error: 'Erro de conexão' } });
+        const errorMessage = error?.error || error || 'Erro de conexão';
+        navigate('/', { state: { error: errorMessage } });
       });
 
     return () => {
@@ -467,7 +452,7 @@ function Sala() {
       socket.off('draw-line');
       clearAllTimeouts();
     };
-  }, [roomCode, navigate, currentStreak, round, players, drawerId, maxRounds, user]);
+  }, [roomCode, navigate, currentStreak, round, players, drawerId, maxRounds, user, playSound, showRoundTransitionAnimation, addTimeout]);
 
   const handleLeaveRoom = () => {
     socketService.leaveRoom();
@@ -479,144 +464,17 @@ function Sala() {
     socketService.getSocket().emit('start-game', { roomCode });
   };
 
-  // Funções para ferramentas de desenho
-  const handleToolChange = (tool: DrawingTool) => {
-    setCurrentTool(tool);
-  };
 
-  const handleUndo = () => {
-    if (lines.length > 0) {
-      const newUndoStack = [...undoStack, lines];
-      const newLines = lines.slice(0, -1);
-      setUndoStack(newUndoStack);
-      setLines(newLines);
-      setRedoStack([]);
-      
-      // Enviar comando de desfazer para outros jogadores
-      socketService.getSocket().emit('undo', { roomCode });
-    }
-  };
-
-  const handleRedo = () => {
-    if (redoStack.length > 0) {
-      const lastUndoState = redoStack[redoStack.length - 1];
-      setLines(lastUndoState);
-      setRedoStack(prev => prev.slice(0, -1));
-      
-      // Enviar comando de refazer para outros jogadores
-      socketService.getSocket().emit('redo', { roomCode });
-    }
-  };
 
   // Adaptar ponto para o tamanho atual do canvas
-  const adaptPoint = (point: { x: number, y: number }, originalWidth = 500, originalHeight = 350) => {
+  const adaptPoint = useCallback((point: { x: number, y: number }, originalWidth = 500, originalHeight = 350) => {
     return {
       x: (point.x / originalWidth) * canvasSize.width,
       y: (point.y / originalHeight) * canvasSize.height
     };
-  };
+  }, [canvasSize]);
 
-  // Desnormalizar ponto para o tamanho original
-  const denormalizePoint = (point: { x: number, y: number }, originalWidth = 500, originalHeight = 350) => {
-    return {
-      x: (point.x * originalWidth) / canvasSize.width,
-      y: (point.y * originalHeight) / canvasSize.height
-    };
-  };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isDrawer) return;
-    setDrawing(true);
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const normalizedPoint = denormalizePoint({ x, y });
-    const line: DrawingLine = {
-      points: [normalizedPoint],
-      tool: { type: 'pen', color: '#000000', size: 3, opacity: 1 },
-      timestamp: Date.now()
-    };
-    setLines(prev => [...prev, line]);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawer || !drawing) return;
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const normalizedPoint = denormalizePoint({ x, y });
-    setLines(prev => {
-      const newLines = [...prev];
-      newLines[newLines.length - 1].points.push(normalizedPoint);
-      return newLines;
-    });
-  };
-
-  // Adicionar suporte para eventos de toque
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
-    // Previne rolagem da tela
-    e.preventDefault();
-    e.stopPropagation();
-    
-    // Armazena posição inicial do toque
-    setDrawing(true);
-    const touch = e.touches[0];
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    const normalizedPoint = denormalizePoint({ x, y });
-    const line: DrawingLine = {
-      points: [normalizedPoint],
-      tool: { type: 'pen', color: '#000000', size: 3, opacity: 1 },
-      timestamp: Date.now()
-    };
-    setLines(prev => [...prev, line]);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isDrawer || !drawing) return;
-    // Previne rolagem da tela
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const touch = e.touches[0];
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    const normalizedPoint = denormalizePoint({ x, y });
-    setLines(prev => {
-      const newLines = [...prev];
-      newLines[newLines.length - 1].points.push(normalizedPoint);
-      return newLines;
-    });
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!isDrawer) return;
-    // Previne rolagem da tela
-    e.preventDefault();
-    e.stopPropagation();
-    
-    setDrawing(false);
-    // Enviar a última linha desenhada para o backend
-    const socket = socketService.getSocket();
-    const lastLine = lines[lines.length - 1];
-    if (lastLine) {
-      socket.emit('draw-line', { roomCode, line: lastLine });
-    }
-  };
-
-  const handleMouseUp = () => {
-    if (!isDrawer) return;
-    setDrawing(false);
-    // Enviar a última linha desenhada para o backend
-    const socket = socketService.getSocket();
-    const lastLine = lines[lines.length - 1];
-    if (lastLine) {
-      socket.emit('draw-line', { roomCode, line: lastLine });
-    }
-  };
 
   // Desenhar no canvas
   useEffect(() => {
@@ -637,7 +495,7 @@ function Sala() {
       });
       ctx.stroke();
     });
-  }, [lines, canvasSize]);
+  }, [lines, canvasSize, adaptPoint]);
 
   const handleGuessSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -670,7 +528,7 @@ function Sala() {
   };
 
   // Função para conquistas desbloqueadas
-  const handleAchievementUnlocked = (achievement: any) => {
+  const handleAchievementUnlocked = (achievement: { id: string; title: string; description: string; icon: string }) => {
     setToastMessage(`🏆 Conquista desbloqueada: ${achievement.title}!`);
     setShowToast(true);
     addTimeout(() => setShowToast(false), 4000);

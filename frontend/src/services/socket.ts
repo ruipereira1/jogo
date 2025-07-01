@@ -6,7 +6,7 @@ declare global {
     env: {
       DEV: boolean;
       PROD: boolean;
-      [key: string]: any;
+      [key: string]: unknown;
     };
   }
 }

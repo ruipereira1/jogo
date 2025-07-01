@@ -223,7 +223,7 @@ function EntrarSala() {
               setTimeout(() => setSuccessMessage(''), 3000);
             }
           }, 3000);
-        }).catch((playError) => {
+        }).catch(() => {
           cleanup();
           throw new Error('Erro ao reproduzir vídeo da câmara');
         });

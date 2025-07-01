@@ -76,9 +76,7 @@ const GameStats: React.FC<GameStatsProps> = ({
   players,
   wordHistory,
   currentRound,
-  maxRounds,
-  isGameFinished,
-  gameStats
+  maxRounds
 }) => {
   const [activeTab, setActiveTab] = useState<'ranking' | 'history' | 'stats'>('ranking');
 
@@ -139,10 +137,7 @@ const GameStats: React.FC<GameStatsProps> = ({
     return `${seconds}s`;
   };
 
-  // Obter posição do jogador
-  const getPlayerPosition = (playerId: string) => {
-    return rankedPlayers.findIndex(p => p.id === playerId) + 1;
-  };
+
 
   // Ícone de medalha baseado na posição
   const getMedalIcon = (position: number) => {
@@ -389,7 +384,7 @@ const GameStats: React.FC<GameStatsProps> = ({
         ].map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
+            onClick={() => setActiveTab(tab.id as 'ranking' | 'history' | 'stats')}
             className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
               activeTab === tab.id
                 ? 'bg-blue-500 text-white'

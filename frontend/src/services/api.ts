@@ -34,7 +34,7 @@ export interface CreateRoomAdvancedResponse {
     category: string;
     isPrivate: boolean;
     maxPlayers: number;
-    settings: any;
+    settings: Record<string, unknown>;
   };
   error?: string;
 }
@@ -65,8 +65,8 @@ export interface RoomStatsResponse {
     round: number;
     maxRounds: number;
     isPrivate: boolean;
-    settings: any;
-    gameStats: any;
+    settings: Record<string, unknown>;
+    gameStats: Record<string, unknown>;
     uptime: number;
     lastActivity: number;
   };

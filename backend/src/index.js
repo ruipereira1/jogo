@@ -21,7 +21,8 @@ const server = http.createServer(app);
 
 // Middleware de segurança e performance
 app.use(helmet({
-  contentSecurityPolicy: false, // Desabilitar CSP para desenvolvimento
+  // Ativar CSP em produção para maior segurança, usando a política padrão do helmet.
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
   crossOriginEmbedderPolicy: false
 }));
 app.use(compression());
