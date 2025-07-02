@@ -31,11 +31,7 @@ const socketOptions = {
   rememberUpgrade: true,
   path: '/socket.io/',
   withCredentials: true,
-  forceNew: false,
-  // Headers específicos para CORS
-  extraHeaders: {
-    'Origin': import.meta.env.PROD ? 'https://desenharapido.netlify.app' : 'http://localhost:5173'
-  }
+  forceNew: false
 };
 
 interface CreateRoomResponse {
